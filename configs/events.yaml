@@ -1,0 +1,20 @@
+# Tier-1 VCT events to scrape. IDs are the number in the vlr.gg event URL:
+#   https://www.vlr.gg/event/<event_id>/<slug>
+#
+# NOTE: these IDs were written without access to vlr.gg (the build environment blocks it).
+# Check each one on vlr.gg before the first full scrape. `valchamps ingest --event <id>` prints
+# the event name it finds, which is a quick way to confirm.
+#
+# Still to add once confirmed: 2024-2026 regional leagues (Americas / EMEA / Pacific / China,
+# Kickoff + Stage 1 + Stage 2) and Champions 2026 itself. Regional leagues are most of the data,
+# so they matter more for the model than the international events.
+events:
+  - {event_id: 1188, name: "VCT 2023: LOCK//IN São Paulo", tier: international, is_lan: true}
+  - {event_id: 1494, name: "VCT 2023: Masters Tokyo", tier: international, is_lan: true}
+  - {event_id: 1657, name: "VALORANT Champions 2023", tier: champions, is_lan: true}
+  - {event_id: 1921, name: "VCT 2024: Masters Madrid", tier: international, is_lan: true}
+  - {event_id: 1999, name: "VCT 2024: Masters Shanghai", tier: international, is_lan: true}
+  - {event_id: 2097, name: "VALORANT Champions 2024", tier: champions, is_lan: true}
+  - {event_id: 2281, name: "VCT 2025: Masters Bangkok", tier: international, is_lan: true}
+  - {event_id: 2282, name: "VCT 2025: Masters Toronto", tier: international, is_lan: true}
+  - {event_id: 2283, name: "VALORANT Champions 2025", tier: champions, is_lan: true}

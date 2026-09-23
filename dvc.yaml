@@ -1,0 +1,16 @@
+# Data pipeline. `dvc repro` scrapes, `dvc push` / `dvc pull` sync data with the remote.
+# Configure a remote once, e.g.:  dvc remote add -d storage s3://<bucket>/valchamps
+stages:
+  ingest:
+    cmd: valchamps ingest --events-file configs/events.yaml
+    deps:
+      - configs/events.yaml
+      - src/valchamps/data
+    outs:
+      # Incremental: raw pages and the DB grow across runs instead of being rebuilt.
+      - data/raw/vlr:
+          persist: true
+      - data/valchamps.db:
+          persist: true
+    # The source site changes independently of our inputs, so always rerun.
+    always_changed: true
