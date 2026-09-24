@@ -29,6 +29,7 @@ def test_save_match_populates_all_tables(engine, completed):
         assert count(conn, db.vetoes) == 7
         assert count(conn, db.players) == 10
         assert count(conn, db.player_map_stats) == 30
+        assert count(conn, db.rounds) == 69
         row = conn.execute(select(db.matches)).one()
         assert (row.winner_id, row.status, row.best_of) == (2593, "completed", 3)
         winners = conn.execute(select(db.maps.c.winner_id).order_by(db.maps.c.map_order)).scalars()
