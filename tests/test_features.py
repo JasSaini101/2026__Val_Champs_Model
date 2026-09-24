@@ -335,3 +335,23 @@ def test_missing_event_end_date_falls_back_to_last_match(history):
         with engine.begin() as conn:
             conn.execute(update(db.matches).where(db.matches.c.match_id == records[0].match_id)
                          .values(status="completed"))  # fmt: skip
+
+
+def test_season_points_include_masters_and_reset_each_year():
+    end = lambda day: (START + timedelta(days=day)).date()  # noqa: E731
+    events = {
+        10: EventInfo(10, "regional", end(10), {1: (1, 3)}),  # league win, 3 points
+        20: EventInfo(20, "international", end(20), {1: (1, 7)}),  # Masters win, 7 points
+    }
+    league = [("Bind", 13, 5, None)]
+    records = [
+        rec(1, 0, 1, 2, league, event_id=10),
+        rec(2, 15, 1, 2, league, tier="international", event_id=20),
+        rec(3, 30, 1, 2, league, event_id=30),
+        rec(4, 400, 1, 2, league, event_id=40),  # next calendar year
+    ]
+    frame, _ = build_feature_frame(records, {}, events=events)
+    rows = frame[frame.perspective == 0].set_index("match_id")
+    assert rows.loc[2, "season_points_a"] == 3.0
+    assert rows.loc[3, "season_points_a"] == 10.0
+    assert rows.loc[4, "season_points_a"] == 0.0

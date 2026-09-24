@@ -116,12 +116,12 @@ def _parse_date(raw: str) -> date | None:
     return None
 
 
-_DATE_RANGE_SEP = re.compile(r"\s+[-\u2013\u2014]\s+")  # hyphen, en dash or em dash
+_DATE_RANGE_SEP = re.compile(r"\s*[-\u2013\u2014]\s*")  # hyphen/en/em dash, spaced or not
 _DAY_YEAR = re.compile(r"^(\d{1,2}), (\d{4})$")
 
 
 def _parse_date_range(raw: str) -> tuple[date | None, date | None]:
-    """Parse 'Aug 1, 2024 - Aug 25, 2024', 'Jul 18 \u2013 Sep 1, 2025' or 'Sep 12 - 30, 2025'."""
+    """Parse 'Aug 1, 2024 - Aug 25, 2024', 'Jul 18 \u2013 Sep 1, 2025' or 'Jan 10\u201325, 2025'."""
     parts = _DATE_RANGE_SEP.split(raw.strip())
     if len(parts) != 2:
         return _parse_date(raw), None

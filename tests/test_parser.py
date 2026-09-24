@@ -133,6 +133,8 @@ def test_event_page():
         ("Sep 12 - Oct 5, 2026", (date(2026, 9, 12), date(2026, 10, 5))),
         ("Jul 18 \u2013 Sep 1, 2025", (date(2025, 7, 18), date(2025, 9, 1))),  # vlr's en dash
         ("Sep 12 - 30, 2025", (date(2025, 9, 12), date(2025, 9, 30))),
+        ("Jan 10\u201325, 2025", (date(2025, 1, 10), date(2025, 1, 25))),  # unspaced en dash
+        ("Jun 5\u201321, 2026", (date(2026, 6, 5), date(2026, 6, 21))),
         ("Dec 28, 2025 \u2013 Jan 5, 2026", (date(2025, 12, 28), date(2026, 1, 5))),
         ("TBD", (None, None)),
     ],

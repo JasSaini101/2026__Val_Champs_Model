@@ -4,6 +4,9 @@ An event's final standings only become visible to matches played after the event
 so a team's Stage 2 result can inform its Champions matches but never its own Stage 2 matches.
 vlr.gg lists the placed teams (usually the top 8); a participant missing from the list is
 counted as finishing just below the last listed place.
+
+Season circuit points (which decide Champions qualification) sum every finished event of the
+calendar year, leagues and Masters.
 """
 
 from __future__ import annotations
@@ -40,7 +43,8 @@ class PlacementTracker:
         league = [e for e in finished if not e.is_international]
         intl = [e for e in finished if e.is_international]
         league_place = self._finish(team, league[-1])[0] if league else NAN
-        season_points = [self._finish(team, e)[1] for e in league if e.end_date.year == date.year]
+        # Circuit points come from leagues and Masters alike (Champions awards none).
+        season_points = [self._finish(team, e)[1] for e in finished if e.end_date.year == date.year]
         return {
             "league_place": league_place,
             "league_won": float(league_place == 1) if not math.isnan(league_place) else NAN,
