@@ -34,7 +34,9 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
-      - run: uv run pytest --cov=valchamps --cov-report=term-missing --cov-report=xml
+      # CPU-only PyTorch for the nn model (the PyPI default for Linux bundles CUDA, ~3 GB).
+      - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: uv run --no-sync pytest --cov=valchamps --cov-report=term-missing --cov-report=xml
       - uses: actions/upload-artifact@v4
         if: matrix.python-version == '3.11'
         with:

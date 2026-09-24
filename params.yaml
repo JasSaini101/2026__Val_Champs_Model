@@ -12,3 +12,38 @@ features:
   h2h_prior: 3       # pseudo-maps shrinking head-to-head win rate toward 50%
   intl_prior: 5      # pseudo-maps shrinking international win rate toward 50%
   player_window: 10  # recent matches per player for lineup rating
+
+# Map model (Phase 4). `valchamps backtest` / `valchamps train` read this section.
+models:
+  backtest:
+    first_test_date: "2025-06-01"  # walk-forward folds: one per event starting on/after this
+    # Most recent events before Champions 2026, held out for the final check:
+    # Masters London 2026 and the four 2026 Stage 2 leagues.
+    holdout_events: [2765, 2976, 2977, 2978, 2776]
+  val_fraction: 0.15  # most recent share of training maps used for early stopping
+  seed: 0
+  linear:
+    C: 0.1
+  gbm:
+    early_stopping_rounds: 50
+    calibration: none  # or "platt"
+    params:
+      n_estimators: 1000
+      learning_rate: 0.03
+      num_leaves: 15
+      max_depth: 4
+      min_child_samples: 40
+      subsample: 0.8
+      subsample_freq: 1
+      colsample_bytree: 0.8
+      reg_lambda: 1.0
+  nn:
+    params:
+      hidden: 32
+      map_embedding: 4
+      dropout: 0.1
+      lr: 0.003
+      weight_decay: 0.001
+      epochs: 300
+      patience: 20
+      batch_size: 256

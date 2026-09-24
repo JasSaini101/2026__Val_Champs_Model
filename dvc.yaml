@@ -24,3 +24,16 @@ stages:
       - features
     outs:
       - data/features/maps.parquet
+
+  train:
+    cmd: valchamps train --model gbm
+    deps:
+      - data/features/maps.parquet
+      - src/valchamps/models
+    params:
+      - models
+    outs:
+      - models/map_model.pkl
+    metrics:
+      - metrics.json:
+          cache: false

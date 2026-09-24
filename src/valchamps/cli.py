@@ -17,6 +17,9 @@ app = typer.Typer(help="VALORANT Champions 2026 model tooling.", no_args_is_help
 DEFAULT_EVENTS = PROJECT_ROOT / "configs" / "events.yaml"
 DEFAULT_PARAMS = PROJECT_ROOT / "params.yaml"
 DEFAULT_FEATURES = PROJECT_ROOT / "data" / "features" / "maps.parquet"
+DEFAULT_MODEL = PROJECT_ROOT / "models" / "map_model.pkl"
+DEFAULT_METRICS = PROJECT_ROOT / "metrics.json"
+REPORTS_DIR = PROJECT_ROOT / "reports"
 
 
 @app.callback()
@@ -118,6 +121,128 @@ def build_features(
         f"{maps.date.min():%Y-%m-%d} to {maps.date.max():%Y-%m-%d}, "
         f"{int(maps.cross_region.sum())} cross-region maps"
     )
+
+
+def _model_list(models: str) -> list[str]:
+    from valchamps.models import MODEL_NAMES
+
+    names = [m.strip() for m in models.split(",") if m.strip()]
+    unknown = [m for m in names if m not in MODEL_NAMES]
+    if unknown:
+        raise typer.BadParameter(f"unknown model(s) {unknown}; choose from {list(MODEL_NAMES)}")
+    return names
+
+
+@app.command()
+def backtest(
+    models: str = typer.Option("elo,elo_cal,linear,gbm,nn", help="Comma-separated models."),
+    features: Path = typer.Option(DEFAULT_FEATURES, help="Feature table from build-features."),
+    params_file: Path = typer.Option(DEFAULT_PARAMS, help="YAML with a `models` section."),
+    track: bool = typer.Option(True, help="Log each model's run to MLflow."),
+) -> None:
+    """Walk-forward backtest: train on the past, predict each later event."""
+    import json
+
+    from valchamps.models import format_table, load_config, load_frame, run_backtest
+    from valchamps.models.metrics import reliability_plot
+
+    config = load_config(params_file)
+    df = load_frame(features)
+    results = []
+    for name in _model_list(models):
+        try:
+            result = run_backtest(df, name, config)
+        except ImportError as exc:  # e.g. nn without torch installed
+            typer.echo(f"skipping {name}: {exc}")
+            continue
+        results.append(result)
+        if track:
+            from valchamps.models import tracking
+
+            out_dir = REPORTS_DIR / "backtest" / name
+            out_dir.mkdir(parents=True, exist_ok=True)
+            with tracking.run("map-model-backtest", name, {"model": name, **config}):
+                tracking.log_segment_metrics(result.metrics)
+                for step, fold in enumerate(result.fold_metrics):
+                    tracking.log_segment_metrics(
+                        {"fold": {k: v for k, v in fold.items() if k not in ("fold", "n")}},
+                        step=step,
+                    )
+                preds = out_dir / "predictions.csv"
+                result.predictions.to_csv(preds, index=False)
+                (out_dir / "folds.json").write_text(json.dumps(result.fold_metrics, indent=2))
+                plot = reliability_plot(
+                    result.predictions["y"], result.predictions["p"],
+                    out_dir / "reliability.png", f"{name}: backtest",
+                )  # fmt: skip
+                for artifact in (preds, out_dir / "folds.json", plot):
+                    tracking.log_artifact(artifact)
+    typer.echo(format_table(results))
+    if track:
+        from valchamps.models import tracking
+
+        typer.echo(f"runs logged to {_display_uri(tracking.configure())}")
+
+
+@app.command()
+def train(
+    model: str = typer.Option("gbm", help="Model to train (see `backtest`)."),
+    features: Path = typer.Option(DEFAULT_FEATURES, help="Feature table from build-features."),
+    params_file: Path = typer.Option(DEFAULT_PARAMS, help="YAML with a `models` section."),
+    out: Path = typer.Option(DEFAULT_MODEL, help="Where to save the trained model."),
+    metrics_file: Path = typer.Option(DEFAULT_METRICS, help="Holdout metrics (JSON) for DVC."),
+    track: bool = typer.Option(True, help="Log the run to MLflow and register the model."),
+) -> None:
+    """Score the model on the holdout events, then refit on all data and save it."""
+    import json
+    import pickle
+
+    from valchamps.models import format_table, load_config, load_frame, make_model, run_holdout
+    from valchamps.models.metrics import reliability_plot
+
+    (name,) = _model_list(model)
+    config = load_config(params_file)
+    df = load_frame(features)
+    holdout = run_holdout(df, name, config)
+    typer.echo("holdout (trained only on earlier maps):")
+    typer.echo(format_table([holdout]))
+
+    final = make_model(name, config).fit(df)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bundle = {"model": final, "name": name, "trained_through": str(df["date"].max().date()),
+              "maps": int(df["game_id"].nunique())}  # fmt: skip
+    out.write_bytes(pickle.dumps(bundle))
+    metrics_file.write_text(json.dumps({"model": name, "holdout": holdout.metrics}, indent=2))
+    typer.echo(
+        f"saved {out} (trained on {bundle['maps']} maps through {bundle['trained_through']})"
+    )
+
+    if track:
+        from valchamps.models import tracking
+
+        out_dir = REPORTS_DIR / "train" / name
+        plot = reliability_plot(
+            holdout.predictions["y"], holdout.predictions["p"],
+            out_dir / "holdout_reliability.png", f"{name}: holdout",
+        )  # fmt: skip
+        with tracking.run("map-model", name, {"model": name, **config}):
+            tracking.log_segment_metrics(holdout.metrics)
+            tracking.log_artifact(plot)
+            tracking.log_artifact(metrics_file)
+            version = tracking.log_and_register_model(final, df)
+        where = _display_uri(tracking.configure())
+        typer.echo(f"logged to {where}" + (f"; registered map-model v{version}" if version else ""))
+
+
+def _display_uri(uri: str) -> str:
+    """Tracking URI without any credentials that might be embedded in it."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(uri)
+    if parts.password or parts.username:
+        netloc = parts.hostname + (f":{parts.port}" if parts.port else "")
+        return urlunsplit(parts._replace(netloc=netloc))
+    return uri
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 | 1 | Scaffold: uv, ruff, pytest, pre-commit, CI, Docker | ✅ |
 | 2 | Data: vlr.gg scraper, parser, SQL schema, DVC stage | ✅ |
 | 3 | Point-in-time features (Elo, form, map pool, rosters) | ✅ |
-| 4 | Map model + calibration + MLflow tracking | ⏳ |
+| 4 | Map model: Elo → linear → LightGBM → PyTorch, walk-forward backtests, MLflow on DagsHub | ✅ |
 | 5 | Series model (veto simulation) | ⏳ |
 | 6 | Monte Carlo bracket simulator | ⏳ |
 | 7 | Scheduled live-update pipeline | ⏳ |
@@ -34,6 +34,8 @@ uv run valchamps init-db      # create data/valchamps.db
 uv run valchamps ingest --event 2274   # scrape one event (VCT 2025 Americas Kickoff)
 uv run valchamps ingest       # scrape every event in configs/events.yaml
 uv run valchamps build-features   # training table -> data/features/maps.parquet
+uv run valchamps backtest     # walk-forward comparison of all models (logs to MLflow)
+uv run valchamps train --model gbm   # holdout check, then fit on everything -> models/map_model.pkl
 ```
 
 Or with Docker:
@@ -105,6 +107,22 @@ Set with environment variables:
 
 Hyper-parameters are in `params.yaml` and tracked by DVC. The same `FeatureBuilder` state will score upcoming Champions matches.
 
+## Map model
+
+`valchamps backtest` compares five models on the same **walk-forward folds**: for each event from mid-2025 on, a model is trained only on maps played before the event started and scored on the event. Masters London 2026 and the 2026 Stage 2 leagues are held out entirely for the final check in `valchamps train`.
+
+| Model | What it is |
+|---|---|
+| `elo` | The Elo system's own probability (no training) |
+| `elo_cal` | Elo rescaled by one learned factor (fixes over- or under-confidence) |
+| `linear` | L2 logistic regression on all features, standardised and clipped at ±3 SD |
+| `gbm` | LightGBM, with early stopping on the most recent 15% of training maps |
+| `nn` | PyTorch MLP that is **antisymmetric by construction**: logit = g(A's view) − g(B's view) |
+
+Inputs are the 54 point-in-time features plus `map_name` (categorical), `is_international` and `cross_region`. Every prediction is symmetric: P(A beats B) + P(B beats A) = 1. Scores (log loss, Brier, accuracy, calibration error) are reported **overall, on cross-region maps and on international events**, since Champions is decided by cross-region matches.
+
+Runs go to MLflow. Set `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` to log to DagsHub; otherwise runs go to a local `mlflow.db` (`uv run mlflow ui --backend-store-uri sqlite:///mlflow.db`). `train` registers the final model as `map-model`. PyTorch is optional: `uv sync --extra nn`.
+
 ## Testing
 
 The parser tests run against HTML fixtures in `tests/fixtures/vlr/`. The fixtures copy vlr.gg's markup, but their numbers and ids are **synthetic** (see the banner at the top of each file). HTTP is mocked with `respx`, so the suite never touches the network. Before relying on a full scrape, save a few real pages as extra fixtures and check that the selectors still match the live site.
@@ -119,8 +137,9 @@ src/valchamps/
   cli.py            `valchamps` command
   data/             scraper, parser, models, db, ingest
   features/         Elo, form, map pool, roster trackers; training-table builder
+  models/           baselines, linear, LightGBM, PyTorch; walk-forward backtests; MLflow
 configs/events.yaml events to scrape
 tests/              pytest suite + HTML fixtures
-dvc.yaml            data pipeline (ingest -> features)
-params.yaml         feature hyper-parameters
+dvc.yaml            pipeline (ingest -> features -> train)
+params.yaml         feature and model hyper-parameters
 ```

@@ -1,6 +1,8 @@
 FROM python:3.11-slim AS base
 
-RUN pip install --no-cache-dir "uv==0.8.17"
+RUN pip install --no-cache-dir "uv==0.8.17" \
+    && apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*  # libgomp1: OpenMP runtime LightGBM needs
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
