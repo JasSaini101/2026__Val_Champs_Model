@@ -119,6 +119,15 @@ player_map_stats = Table(
     Column("first_deaths", Integer),
 )  # fmt: skip
 
+rounds = Table(
+    "rounds", metadata,
+    Column("game_id", Integer, ForeignKey("maps.game_id"), primary_key=True),
+    Column("round_num", Integer, primary_key=True),
+    Column("winner_team_id", Integer, ForeignKey("teams.team_id"), nullable=False),
+    Column("winner_side", String),  # "ct" (defence) | "t" (attack)
+    Column("outcome", String),  # "elim" | "defuse" | "boom" | "time"
+)  # fmt: skip
+
 scrape_log = Table(
     "scrape_log", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -219,6 +228,10 @@ def save_match(conn: Connection, match: Match, *, event_id: int | None = None) -
             "team2_ct": m.team2_ct, "team2_t": m.team2_t, "winner_id": winner,
             "duration": m.duration,
         }])  # fmt: skip
+        upsert(conn, rounds, [{
+            "game_id": m.game_id, "round_num": r.round_num, "winner_team_id": r.winner_team_id,
+            "winner_side": r.winner_side, "outcome": r.outcome,
+        } for r in m.rounds])  # fmt: skip
         unique_players = {
             p.player_id: {"player_id": p.player_id, "handle": p.handle} for p in m.players
         }

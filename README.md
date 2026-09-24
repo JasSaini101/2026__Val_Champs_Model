@@ -52,7 +52,8 @@ docker run --rm -v "$PWD/data:/app/data" valchamps ingest --event 2097
 - match header: teams, series score, best-of, UTC start time, stage
 - map vetoes (`FNC ban Icebox; TH pick Lotus; …; Abyss remains`), with team tags mapped to team ids
 - each map: name, who picked it, final rounds, attack/defence halves, duration
-- per-player stats for each map: agent, rating, ACS, K/D/A, KAST, ADR, HS%, first kills/deaths
+- round by round for each map: winner, side (attack/defence) and how the round ended (elimination, spike defused, spike detonated, time)
+- per-player stats for each map: agent, rating, ACS, K/D/A, KAST, ADR, HS%, first kills/deaths *(these tables are missing from the pages vlr.gg currently serves to the scraper; being investigated)*
 
 **Schema** (`src/valchamps/data/db.py`, SQLAlchemy Core, works on SQLite and Postgres):
 
@@ -60,6 +61,7 @@ docker run --rm -v "$PWD/data:/app/data" valchamps ingest --event 2097
 events ─┐
         └─< matches >── teams
                ├─< maps ─< player_map_stats >── players
+               │     └─< rounds
                └─< vetoes
 scrape_log (audit of every fetch)
 ```
@@ -82,6 +84,8 @@ Set with environment variables:
 ## Testing
 
 The parser tests run against HTML fixtures in `tests/fixtures/vlr/`. The fixtures copy vlr.gg's markup, but their numbers and ids are **synthetic** (see the banner at the top of each file). HTTP is mocked with `respx`, so the suite never touches the network. Before relying on a full scrape, save a few real pages as extra fixtures and check that the selectors still match the live site.
+
+Debug a page's structure with `uv run python scripts/inspect_vlr_page.py [page.html | --fetch /path]`.
 
 ## Project layout
 

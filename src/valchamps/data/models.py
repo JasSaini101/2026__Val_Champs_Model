@@ -61,6 +61,14 @@ class PlayerMapStats:
 
 
 @dataclass(frozen=True)
+class RoundResult:
+    round_num: int
+    winner_team_id: int
+    winner_side: str | None  # "ct" (defence) | "t" (attack)
+    outcome: str | None  # "elim" | "defuse" | "boom" (spike detonated) | "time"
+
+
+@dataclass(frozen=True)
 class MapResult:
     game_id: int
     map_order: int
@@ -74,6 +82,7 @@ class MapResult:
     team2_t: int | None = None
     duration: str | None = None
     players: list[PlayerMapStats] = field(default_factory=list)
+    rounds: list[RoundResult] = field(default_factory=list)
 
     @property
     def completed(self) -> bool:

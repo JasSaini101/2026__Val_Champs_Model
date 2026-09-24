@@ -69,7 +69,7 @@ def test_maps_skip_all_maps_tab_and_keep_order(completed):
 
 def test_map_halves_and_duration(completed):
     lotus = completed.maps[0]
-    assert (lotus.team1_ct, lotus.team1_t, lotus.team2_ct, lotus.team2_t) == (7, 6, 4, 6)
+    assert (lotus.team1_ct, lotus.team1_t, lotus.team2_ct, lotus.team2_t) == (7, 6, 5, 5)
     assert lotus.duration == "49:31"
     # Overtime map: regulation halves don't sum to the final score.
     abyss = completed.maps[2]
@@ -145,3 +145,36 @@ def test_match_id_from_path():
     assert match_id_from_path("/378829/fnatic-vs-th") == 378829
     with pytest.raises(ParseError):
         match_id_from_path("/team/2593/fnatic")
+
+
+def test_rounds_match_map_scores(completed):
+    for m in completed.maps:
+        assert [r.round_num for r in m.rounds] == list(
+            range(1, m.team1_rounds + m.team2_rounds + 1)
+        )
+        assert sum(r.winner_team_id == FNC for r in m.rounds) == m.team1_rounds
+        assert sum(r.winner_team_id == TH for r in m.rounds) == m.team2_rounds
+        assert all(r.outcome in {"elim", "defuse", "boom", "time"} for r in m.rounds)
+
+
+def test_round_sides_match_half_scores(completed):
+    lotus = completed.maps[0]
+    fnc_rounds = [r for r in lotus.rounds if r.winner_team_id == FNC]
+    assert sum(r.winner_side == "ct" for r in fnc_rounds) == lotus.team1_ct
+    assert sum(r.winner_side == "t" for r in fnc_rounds) == lotus.team1_t
+    # Pistol rounds are round 1 and round 13.
+    assert {r.round_num for r in lotus.rounds} >= {1, 13}
+
+
+@pytest.fixture(scope="module")
+def no_stats():
+    """vlr.gg as served in Sep 2026: round strip present, player stats tables absent."""
+    return parse_match(load_fixture("match_378829_no_stats.html"), 378829)
+
+
+def test_no_stats_page_still_yields_tags_vetoes_and_rounds(no_stats, completed):
+    assert (no_stats.team1.tag, no_stats.team2.tag) == ("FNC", "TH")
+    assert [v.team_id for v in no_stats.veto] == [v.team_id for v in completed.veto]
+    assert all(v.team_id is not None for v in no_stats.veto if v.action != "remains")
+    assert [len(m.rounds) for m in no_stats.maps] == [23, 20, 26]
+    assert all(m.players == [] for m in no_stats.maps)

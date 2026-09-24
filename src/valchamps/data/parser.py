@@ -19,6 +19,7 @@ from valchamps.data.models import (
     Match,
     MatchListing,
     PlayerMapStats,
+    RoundResult,
     Team,
     VetoStep,
 )
@@ -171,17 +172,56 @@ def _parse_header_team(soup: BeautifulSoup, side: int) -> Team:
 
 
 def _team_tags(soup: BeautifulSoup) -> list[str | None]:
-    """Team tags (e.g. 'FNC') from the first map's player tables; vetoes refer to teams by tag."""
+    """Team tags (e.g. 'FNC') for team 1 and team 2; vetoes refer to teams by tag.
+
+    Read from the first map's round-by-round header, falling back to the player tables.
+    """
     first_game = next(
         (g for g in soup.select(".vm-stats-game") if g.get("data-game-id") != "all"), None
     )
     tags: list[str | None] = [None, None]
     if first_game is None:
         return tags
+    label_col = first_game.select_one(".vlr-rounds-row-col:not([title]):has(.team)")
+    if label_col is not None:
+        found = [_text(t) for t in label_col.select(".team")]
+        if len(found) == 2 and all(found):
+            return [found[0], found[1]]
     for i, table in enumerate(first_game.select("table.wf-table-inset.mod-overview")[:2]):
         tag = _text(table.select_one("td.mod-player .ge-text-light"))
         tags[i] = tag or None
     return tags
+
+
+_ROUND_OUTCOME = re.compile(r"/round/([a-z]+)\.")
+
+
+def _parse_rounds(game: Tag, team1: Team, team2: Team) -> list[RoundResult]:
+    """Round-by-round winners from the ``vlr-rounds`` strip under the map header."""
+    rounds: list[RoundResult] = []
+    for col in game.select(".vlr-rounds-row-col[title]"):
+        num = _num(_text(col.select_one(".rnd-num")), int)
+        squares = col.select(".rnd-sq")
+        if num is None or len(squares) != 2:
+            continue
+        winner_idx = next(
+            (i for i, sq in enumerate(squares) if "mod-win" in sq.get("class", [])), None
+        )
+        if winner_idx is None:
+            continue
+        classes = squares[winner_idx].get("class", [])
+        side = "ct" if "mod-ct" in classes else "t" if "mod-t" in classes else None
+        img = squares[winner_idx].select_one("img")
+        outcome_match = _ROUND_OUTCOME.search(img.get("src", "")) if img else None
+        rounds.append(
+            RoundResult(
+                round_num=num,
+                winner_team_id=(team1 if winner_idx == 0 else team2).team_id,
+                winner_side=side,
+                outcome=outcome_match.group(1) if outcome_match else None,
+            )
+        )
+    return rounds
 
 
 def parse_veto(raw: str, teams: dict[str, int]) -> list[VetoStep]:
@@ -286,6 +326,7 @@ def _parse_map(game: Tag, order: int, team1: Team, team2: Team) -> MapResult | N
         team2_t=_half(right, "mod-t"),
         duration=_text(header.select_one(".map-duration")) or None,
         players=players,
+        rounds=_parse_rounds(game, team1, team2),
     )
 
 
