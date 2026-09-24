@@ -16,8 +16,9 @@ import pandas as pd
 from valchamps.features.form import FormTracker
 from valchamps.features.map_pool import MapPoolTracker
 from valchamps.features.params import FeatureParams
+from valchamps.features.placement import PlacementTracker
 from valchamps.features.ratings import EloTracker
-from valchamps.features.records import MapRecord, MatchRecord
+from valchamps.features.records import EventInfo, MapRecord, MatchRecord
 from valchamps.features.roster import RosterTracker
 
 META_COLUMNS = [
@@ -30,12 +31,13 @@ META_COLUMNS = [
 _TEAM_FEATURES = [
     "elo", "map_dev", "form_winrate", "form_round_diff", "rest_days", "matches_30d",
     "maps_played", "intl_maps", "intl_winrate", "map_played", "map_winrate", "pick_rate",
-    "ban_rate", "roster_continuity", "lineup_rating",
+    "ban_rate", "roster_continuity", "lineup_rating", "league_place", "league_won",
+    "season_points", "intl_place",
 ]  # fmt: skip
 # Per-team values that also get an a-minus-b column.
 _DIFF_FEATURES = [
     "elo", "region_offset", "map_dev", "form_winrate", "form_round_diff", "intl_winrate",
-    "map_winrate", "lineup_rating",
+    "map_winrate", "lineup_rating", "league_place", "season_points",
 ]  # fmt: skip
 _PAIR_FEATURES = ["pick_a", "pick_b", "decider", "elo_prob", "h2h_maps", "h2h_winrate"]
 
@@ -53,12 +55,16 @@ def _diff(a: float, b: float) -> float:
 class FeatureBuilder:
     """Holds every tracker; also the state used to score future (unplayed) matches."""
 
-    def __init__(self, params: FeatureParams, regions: dict[int, str]) -> None:
+    def __init__(
+        self, params: FeatureParams, regions: dict[int, str],
+        events: dict[int, EventInfo] | None = None,
+    ) -> None:  # fmt: skip
         self.params = params
         self.elo = EloTracker(params.elo, regions)
         self.form = FormTracker(params.form_window, params.intl_prior, params.h2h_prior)
         self.map_pool = MapPoolTracker(params.map_prior)
         self.roster = RosterTracker(params.player_window)
+        self.placement = PlacementTracker(events or {})
 
     def rows_for(self, match: MatchRecord) -> list[dict]:
         """Feature rows for every map of ``match`` from the current (pre-match) state."""
@@ -70,6 +76,7 @@ class FeatureBuilder:
                 "region_offset": self.elo.offset(t),
                 **self.form.snapshot(t, o, match.date),
                 **self.roster.snapshot(t, match),
+                **self.placement.snapshot(t, match.date),
             }
             for t, o in ((a, b), (b, a))
         }
@@ -128,13 +135,15 @@ class FeatureBuilder:
         self.form.update(match)
         self.map_pool.update(match)
         self.roster.update(match)
+        self.placement.update(match)
 
 
 def build_feature_frame(
-    records: Iterable[MatchRecord], regions: dict[int, str], params: FeatureParams | None = None
-) -> tuple[pd.DataFrame, FeatureBuilder]:
+    records: Iterable[MatchRecord], regions: dict[int, str], params: FeatureParams | None = None,
+    events: dict[int, EventInfo] | None = None,
+) -> tuple[pd.DataFrame, FeatureBuilder]:  # fmt: skip
     """Replay ``records`` (oldest first) and return the training table and final state."""
-    builder = FeatureBuilder(params or FeatureParams(), regions)
+    builder = FeatureBuilder(params or FeatureParams(), regions, events)
     rows: list[dict] = []
     previous = None
     for match in records:

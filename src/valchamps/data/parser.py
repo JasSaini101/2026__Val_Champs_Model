@@ -20,6 +20,7 @@ from valchamps.data.models import (
     MatchListing,
     PlayerMapStats,
     RoundResult,
+    Standing,
     Team,
     VetoStep,
 )
@@ -115,34 +116,101 @@ def _parse_date(raw: str) -> date | None:
     return None
 
 
+_DATE_RANGE_SEP = re.compile(r"\s+[-\u2013\u2014]\s+")  # hyphen, en dash or em dash
+_DAY_YEAR = re.compile(r"^(\d{1,2}), (\d{4})$")
+
+
 def _parse_date_range(raw: str) -> tuple[date | None, date | None]:
-    """Parse strings like 'Aug 1, 2024 - Aug 25, 2024' or 'Sep 12 - Oct 5, 2026'."""
-    parts = [p.strip() for p in raw.split(" - ")]
+    """Parse 'Aug 1, 2024 - Aug 25, 2024', 'Jul 18 \u2013 Sep 1, 2025' or 'Sep 12 - 30, 2025'."""
+    parts = _DATE_RANGE_SEP.split(raw.strip())
     if len(parts) != 2:
         return _parse_date(raw), None
     start_raw, end_raw = parts
     end = _parse_date(end_raw)
+    if end is None and (m := _DAY_YEAR.match(end_raw)):
+        month = start_raw.split()[0] if start_raw else ""
+        end = _parse_date(f"{month} {m.group(1)}, {m.group(2)}")
     start = _parse_date(start_raw)
     if start is None and end is not None:
         start = _parse_date(f"{start_raw}, {end.year}")
     return start, end
 
 
-def parse_event(html: str, event_id: int) -> Event:
-    soup = _soup(html)
-    name = _text(soup.select_one("h1.wf-title")) or f"event-{event_id}"
+def _event_details(soup: BeautifulSoup) -> dict[str, str]:
+    """Label -> value pairs from the event header ('Dates', 'Prize', 'Location')."""
     details: dict[str, str] = {}
-    for item in soup.select(".event-desc-item"):
+    for item in soup.select(".event-header-main-meta > div"):  # current layout
+        label = _text(item.select_one(".label")).lower()
+        if label:
+            details[label] = _text(item.select_one(".value"))
+    for item in soup.select(".event-desc-item"):  # older layout
         label = _text(item.select_one(".event-desc-item-label")).lower()
         details[label] = _text(item.select_one(".event-desc-item-value"))
+    return details
+
+
+def parse_event(html: str, event_id: int) -> Event:
+    soup = _soup(html)
+    title = soup.select_one("h1.event-header-main-title") or soup.select_one("h1.wf-title")
+    details = _event_details(soup)
     start, end = _parse_date_range(details.get("dates", ""))
     return Event(
         event_id=event_id,
-        name=name,
+        name=_text(title) or f"event-{event_id}",
         start_date=start,
         end_date=end,
         location=details.get("location") or None,
     )
+
+
+_PLACE = re.compile(r"(\d+)(?:st|nd|rd|th)?(?:\s*[-\u2013]\s*(\d+))?")
+
+
+def parse_standings(html: str) -> list[Standing]:
+    """Final placements from the event page's "Prize Distribution" table.
+
+    Only placed teams are listed (usually the top 8); columns are found by their header label
+    because league events carry Points/Note columns that international events lack.
+    """
+    table = _soup(html).select_one(".wf-ptable--standings")
+    if table is None:
+        return []
+    rows = table.select(":scope > .row")
+    if not rows:
+        return []
+    header = [_text(c).lower() for c in rows[0].select(":scope > .cell")]
+    col = {name: i for i, name in enumerate(header)}
+    standings: list[Standing] = []
+    for row in rows[1:]:
+        cells = row.select(":scope > .cell")
+        place_m = _PLACE.match(_text(cells[col.get("place", 0)]).replace(" ", ""))
+        link = row.select_one("a[href*='/team/']")
+        team_id = _id_from_href(link.get("href") if link else None)
+        if place_m is None or team_id is None:
+            continue  # TBD slot of an unfinished event
+        name_node = link.select_one(".text-of")
+        name = (
+            _WS.sub(" ", name_node.find(string=True, recursive=False) or "").strip()
+            if name_node
+            else ""
+        )
+        place = int(place_m.group(1))
+        points = note = None
+        if "points" in col and col["points"] < len(cells):
+            points = _num(_text(cells[col["points"]]).replace(" ", ""), int)
+        if "note" in col and col["note"] < len(cells):
+            note = _text(cells[col["note"]]) or None
+        standings.append(
+            Standing(
+                team_id=team_id,
+                team_name=name or _text(link),
+                place=place,
+                place_max=int(place_m.group(2)) if place_m.group(2) else place,
+                circuit_points=points,
+                note=note,
+            )
+        )
+    return standings
 
 
 def parse_event_matches(html: str) -> list[MatchListing]:

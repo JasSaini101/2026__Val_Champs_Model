@@ -30,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Connection
 
-from valchamps.data.models import Event, Match
+from valchamps.data.models import Event, Match, Standing
 
 metadata = MetaData()
 
@@ -128,6 +128,16 @@ rounds = Table(
     Column("outcome", String),  # "elim" | "defuse" | "boom" | "time"
 )  # fmt: skip
 
+placements = Table(
+    "placements", metadata,
+    Column("event_id", Integer, ForeignKey("events.event_id"), primary_key=True),
+    Column("team_id", Integer, ForeignKey("teams.team_id"), primary_key=True),
+    Column("place", Integer, nullable=False),  # best place of a shared range ("5th-6th" -> 5)
+    Column("place_max", Integer, nullable=False),
+    Column("circuit_points", Integer),
+    Column("note", String),
+)  # fmt: skip
+
 scrape_log = Table(
     "scrape_log", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -182,6 +192,20 @@ def upsert_event(
         "is_lan": is_lan, "start_date": ev.start_date, "end_date": ev.end_date,
         "location": ev.location,
     }])  # fmt: skip
+
+
+def save_standings(conn: Connection, event_id: int, standings: Sequence[Standing]) -> None:
+    """Replace an event's placements (they fill in as a live event progresses)."""
+    conn.execute(placements.delete().where(placements.c.event_id == event_id))
+    if not standings:
+        return
+    # Teams normally exist from the event's matches; never overwrite a known name or tag.
+    upsert(conn, teams, [{"team_id": s.team_id, "name": s.team_name} for s in standings],
+           update=False)  # fmt: skip
+    upsert(conn, placements, [{
+        "event_id": event_id, "team_id": s.team_id, "place": s.place,
+        "place_max": s.place_max, "circuit_points": s.circuit_points, "note": s.note,
+    } for s in standings])  # fmt: skip
 
 
 def save_match(conn: Connection, match: Match, *, event_id: int | None = None) -> None:

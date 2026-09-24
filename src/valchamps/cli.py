@@ -69,7 +69,13 @@ def build_features(
     params_file: Path = typer.Option(DEFAULT_PARAMS, help="YAML with a `features` section."),
 ) -> None:
     """Build the per-map training table from the database."""
-    from valchamps.features import FeatureParams, build_feature_frame, load_records, team_regions
+    from valchamps.features import (
+        FeatureParams,
+        build_feature_frame,
+        load_events,
+        load_records,
+        team_regions,
+    )
 
     engine = db.get_engine(Settings().db_url)
     records = load_records(engine)
@@ -77,7 +83,7 @@ def build_features(
         typer.echo("no completed matches in the database; run `valchamps ingest` first")
         raise typer.Exit(code=1)
     params = FeatureParams.from_yaml(params_file) if params_file.exists() else FeatureParams()
-    frame, _ = build_feature_frame(records, team_regions(engine), params)
+    frame, _ = build_feature_frame(records, team_regions(engine), params, load_events(engine))
     out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(out, index=False)
     maps = frame[frame.perspective == 0]

@@ -14,6 +14,7 @@ from valchamps.data.parser import (
     parse_event,
     parse_event_matches,
     parse_match,
+    parse_standings,
     parse_veto,
 )
 
@@ -130,6 +131,9 @@ def test_event_page():
     [
         ("Aug 1, 2024 - Aug 25, 2024", (date(2024, 8, 1), date(2024, 8, 25))),
         ("Sep 12 - Oct 5, 2026", (date(2026, 9, 12), date(2026, 10, 5))),
+        ("Jul 18 \u2013 Sep 1, 2025", (date(2025, 7, 18), date(2025, 9, 1))),  # vlr's en dash
+        ("Sep 12 - 30, 2025", (date(2025, 9, 12), date(2025, 9, 30))),
+        ("Dec 28, 2025 \u2013 Jan 5, 2026", (date(2025, 12, 28), date(2026, 1, 5))),
         ("TBD", (None, None)),
     ],
 )
@@ -226,3 +230,42 @@ def test_misaligned_columns_raise():
     html = load_fixture("real/ovw_scoreboard_row.html").replace('data-col="', 'data-x="')
     with pytest.raises(ParseError, match="misaligned"):
         _parse_players(_real_row_game(html), FNC_TEAM, BLG_TEAM)
+
+
+@pytest.mark.parametrize(
+    ("fixture", "event_id", "name", "dates", "location"),
+    [
+        ("real/event_2501_americas_stage2_2025.html", 2501, "VCT 2025: Americas Stage 2",
+         (date(2025, 7, 18), date(2025, 9, 1)), "Riot Games Arena, Los Angeles"),
+        ("real/event_2283_champions_2025.html", 2283, "Valorant Champions 2025",
+         (date(2025, 9, 12), date(2025, 10, 5)), "Accor Arena, Paris"),
+    ],
+)  # fmt: skip
+def test_real_event_header(fixture, event_id, name, dates, location):
+    ev = parse_event(load_fixture(fixture), event_id)
+    assert (ev.name, (ev.start_date, ev.end_date), ev.location) == (name, dates, location)
+
+
+def test_real_league_standings():
+    rows = parse_standings(load_fixture("real/event_2501_americas_stage2_2025.html"))
+    assert [(r.place, r.place_max) for r in rows] == [
+        (1, 1), (2, 2), (3, 3), (4, 4), (5, 6), (5, 6), (7, 8), (7, 8),
+    ]  # fmt: skip
+    g2 = rows[0]
+    assert (g2.team_id, g2.team_name, g2.circuit_points, g2.note) == (
+        11058, "G2 Esports", 11, "Champions",
+    )  # fmt: skip
+    assert rows[2].note is None  # 3rd place did not qualify through this event
+    assert [r.circuit_points for r in rows] == [11, 9, 9, 6, 3, 3, 2, 2]
+    assert rows[4].team_name == "LEVIAT\u00c1N"
+
+
+def test_real_international_standings_have_no_points_column():
+    rows = parse_standings(load_fixture("real/event_2283_champions_2025.html"))
+    assert [(r.place, r.team_name) for r in rows[:2]] == [(1, "NRG"), (2, "FNATIC")]
+    assert len(rows) == 8
+    assert all(r.circuit_points is None and r.note is None for r in rows)
+
+
+def test_event_without_standings():
+    assert parse_standings(load_fixture("event_2097.html")) == []

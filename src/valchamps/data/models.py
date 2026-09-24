@@ -23,6 +23,18 @@ class Event:
 
 
 @dataclass(frozen=True)
+class Standing:
+    """A team's final placement in an event (vlr.gg lists the prize-winning places)."""
+
+    team_id: int
+    team_name: str
+    place: int  # best place of a shared range: "5th-6th" -> 5
+    place_max: int  # worst place of the range: "5th-6th" -> 6
+    circuit_points: int | None = None  # VCT circuit points, listed for league events
+    note: str | None = None  # e.g. the event the team qualified for
+
+
+@dataclass(frozen=True)
 class MatchListing:
     """A row from an event's match list: enough to decide whether to fetch the match page."""
 
