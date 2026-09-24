@@ -123,3 +123,38 @@ def make_history(
         for a, b in itertools.combinations(top, 2):
             play(a, b, eid, "international")
     return Truth(strength=strength, region=region_of)
+
+
+CHAMPIONS_EVENT = 99
+
+
+def add_champions_event(engine: Engine, teams: list[int], played: int = 1) -> dict[str, list[int]]:
+    """A Champions-style event: 16 ``teams`` in 4 groups, the first ``played`` openings finished.
+
+    Upserts, so calling it again with a larger ``played`` finishes more opening matches.
+    """
+    groups = {g: teams[i::4] for i, g in enumerate("ABCD")}
+    day = datetime(2027, 3, 1, 12)
+    actions = ["ban", "ban", "pick", "pick", "ban", "ban", "remains"]
+    with engine.begin() as conn:
+        db.upsert_event(conn, Event(CHAMPIONS_EVENT, "Champions"), tier="champions",
+                        region="international")  # fmt: skip
+        n = 0
+        for g, (a, b, c, d) in groups.items():
+            for t1, t2 in ((a, b), (c, d)):
+                n += 1
+                done = n <= played
+                veto = [VetoStep(i + 1, act, MAP_POOL[i],
+                                 None if act == "remains" else (t1 if i % 2 == 0 else t2))
+                        for i, act in enumerate(actions)]  # fmt: skip
+                maps = [MapResult(900_000 + 10 * n + k, k + 1, MAP_POOL[2 + k], 13, 7, t1)
+                        for k in (0, 1)]  # fmt: skip
+                db.save_match(conn, Match(
+                    match_id=90_000 + n, event_id=CHAMPIONS_EVENT, event_name="Champions",
+                    stage=f"Group Stage: Opening ({g})", date_utc=day + timedelta(hours=3 * n),
+                    status="completed" if done else "upcoming", best_of=3,
+                    team1=Team(t1, f"t{t1}"), team2=Team(t2, f"t{t2}"),
+                    team1_score=2 if done else None, team2_score=0 if done else None,
+                    veto=veto if done else [], maps=maps if done else [],
+                ))  # fmt: skip
+    return groups

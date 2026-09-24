@@ -9,30 +9,30 @@ stages:
       size: 4263
     - path: src/valchamps/data
       hash: md5
-      md5: f7f34b5917fc2b0f50723394281d1d6b.dir
+      md5: dc95908dd378525eb4a4716d178aba8f.dir
       size: 106581
       nfiles: 12
     outs:
     - path: data/raw/vlr
       hash: md5
-      md5: da92220bf6ae9539cbc238c723865d9e.dir
-      size: 469194428
+      md5: cb57adc04f7f27e4e2c99b90f3cb0b93.dir
+      size: 469211583
       nfiles: 1222
     - path: data/valchamps.db
       hash: md5
-      md5: fcbfeae7566a16970ca47dcac6a3e744
+      md5: fc45a3404e3fbca1087817984e004624
       size: 4997120
   features:
     cmd: valchamps build-features
     deps:
     - path: data/valchamps.db
       hash: md5
-      md5: fcbfeae7566a16970ca47dcac6a3e744
+      md5: fc45a3404e3fbca1087817984e004624
       size: 4997120
     - path: src/valchamps/features
       hash: md5
-      md5: 0921908832590c944bb938b2e359f8da.dir
-      size: 82969
+      md5: 5b7cef29534da7bb2d780f927536f1c2.dir
+      size: 89315
       nfiles: 18
     params:
       params.yaml:
@@ -54,3 +54,62 @@ stages:
       hash: md5
       md5: 82473ab8dac6641c75429879c31f673d
       size: 712112
+  train:
+    cmd: valchamps train --model nn
+    deps:
+    - path: data/features/maps.parquet
+      hash: md5
+      md5: 82473ab8dac6641c75429879c31f673d
+      size: 712112
+    - path: src/valchamps/models
+      hash: md5
+      md5: f630907904b13a08f4b09f0599187c9e.dir
+      size: 87137
+      nfiles: 20
+    params:
+      params.yaml:
+        models:
+          backtest:
+            first_test_date: '2025-06-01'
+            holdout_events:
+            - 2765
+            - 2976
+            - 2977
+            - 2978
+            - 2776
+          val_fraction: 0.15
+          seed: 0
+          linear:
+            C: 0.1
+          gbm:
+            early_stopping_rounds: 50
+            calibration: none
+            params:
+              n_estimators: 1000
+              learning_rate: 0.03
+              num_leaves: 15
+              max_depth: 4
+              min_child_samples: 40
+              subsample: 0.8
+              subsample_freq: 1
+              colsample_bytree: 0.8
+              reg_lambda: 1.0
+          nn:
+            params:
+              hidden: 32
+              map_embedding: 4
+              dropout: 0.1
+              lr: 0.003
+              weight_decay: 0.001
+              epochs: 300
+              patience: 20
+              batch_size: 256
+    outs:
+    - path: metrics.json
+      hash: md5
+      md5: 256048f266557ad1d96e89e4c42c2760
+      size: 626
+    - path: models/map_model.pkl
+      hash: md5
+      md5: 504e1169ed710d00a109a855e99ccaf3
+      size: 21093

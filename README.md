@@ -22,7 +22,7 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 | 4 | Map model: Elo → linear → LightGBM → PyTorch, walk-forward backtests, MLflow on DagsHub | ✅ |
 | 5 | Series model: veto simulation, exact Bo3/Bo5 odds, series backtest | ✅ |
 | 6 | Monte Carlo bracket simulator | ✅ |
-| 7 | Scheduled live-update pipeline | ⏳ |
+| 7 | Scheduled live-update pipeline | ✅ |
 | 8 | FastAPI + Streamlit dashboard | ⏳ |
 
 ## Quick start
@@ -40,6 +40,7 @@ uv run valchamps train --model nn    # holdout check, then fit on everything -> 
 uv run valchamps series-backtest     # walk-forward Bo3/Bo5 odds: simulated veto vs actual maps vs Elo
 uv run valchamps predict-match "G2 Esports" "Paper Rex" --best-of 3
 uv run valchamps simulate            # Champions 2026 title odds (--odds elo for raw Elo)
+uv run valchamps update              # scrape new results, re-simulate, publish to odds/2766/
 ```
 
 Or with Docker:
@@ -168,6 +169,24 @@ It also reports how much probability the simulated veto gave to the real map seq
 
 **Output**: the per-team table goes to `reports/bracket/odds_<event>_<odds>.csv`, with a JSON copy next to it.
 
+## Live updates
+
+`valchamps update` refreshes the forecast while the event runs. It scrapes the event (new results, and bracket slots as they fill in), re-runs the 100,000-tournament simulation from everything now known, and publishes to `odds/2766/`:
+
+- `latest.json`: the current per-team odds, the time of the update, and the finished results behind them.
+- `history.csv`: every published forecast, one row per team, so the odds can be followed through the event.
+
+It publishes only when the set of finished results has changed, so running it every hour doesn't produce a commit every hour. The map model stays frozen for the event. Elo, form and the other features still update from every new result, because the whole history is replayed before each simulation.
+
+**Schedule** (`.github/workflows/update-odds.yml`): the workflow runs hourly through September and October, and on demand from the Actions tab. Each run:
+
+1. pulls only the database and the map model from DagsHub, not the page cache
+2. restores the pages scraped by earlier runs from the Actions cache
+3. runs `valchamps update`
+4. commits `odds/` to `main` with `[skip ci]` when the odds changed
+
+It needs the repository secrets `DAGSHUB_USERNAME` and `DAGSHUB_TOKEN`. It only reads from DagsHub and never pushes data back.
+
 ## Testing
 
 The parser tests run against HTML fixtures in `tests/fixtures/vlr/`. The fixtures copy vlr.gg's markup, but their numbers and ids are **synthetic** (see the banner at the top of each file). HTTP is mocked with `respx`, so the suite never touches the network. Before relying on a full scrape, save a few real pages as extra fixtures and check that the selectors still match the live site.
@@ -187,6 +206,8 @@ src/valchamps/
   bracket/          tournament format, pairwise odds, Monte Carlo bracket simulation
 configs/events.yaml events to scrape
 configs/bracket.yaml Champions format and playoff seeding
+odds/<event>/       published live odds (latest.json, history.csv), committed by the update job
+.github/workflows/  CI; update-odds.yml is the hourly live-update job
 tests/              pytest suite + HTML fixtures
 dvc.yaml            pipeline (ingest -> features -> train)
 params.yaml         feature, model and series hyper-parameters

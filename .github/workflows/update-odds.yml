@@ -1,0 +1,77 @@
+# Live odds during Champions 2026: scrape new results, re-simulate, commit the odds if they changed.
+#
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   DAGSHUB_USERNAME  your DagsHub user name
+#   DAGSHUB_TOKEN     a DagsHub access token (read access to the DVC remote is enough)
+# The job only reads from DagsHub. New results live in the scraped pages it keeps in the Actions
+# cache and in the odds it commits; nothing is pushed back to DVC.
+name: Update odds
+
+on:
+  schedule:
+    - cron: "17 * * 9,10 *"  # hourly through Sep and Oct (the event runs Sep 24 - Oct 18)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even if no new result has come in"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # to commit odds/
+
+concurrency:
+  group: update-odds
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra mlops
+      # CPU-only PyTorch for the nn map model (the PyPI default for Linux bundles CUDA).
+      - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Pull the database and map model from DagsHub
+        env:
+          DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+        run: |
+          if [ -z "$DAGSHUB_TOKEN" ]; then
+            echo "::error::set the DAGSHUB_USERNAME and DAGSHUB_TOKEN repository secrets"
+            exit 1
+          fi
+          uv run --no-sync dvc remote modify --local origin auth basic
+          uv run --no-sync dvc remote modify --local origin user "$DAGSHUB_USERNAME"
+          uv run --no-sync dvc remote modify --local origin password "$DAGSHUB_TOKEN"
+          uv run --no-sync dvc pull data/valchamps.db models/map_model.pkl
+
+      # Pages of finished matches never change, so keeping them avoids refetching them each hour.
+      - name: Restore pages scraped by earlier runs
+        uses: actions/cache@v4
+        with:
+          path: data/raw/vlr
+          key: vlr-pages-${{ github.run_id }}
+          restore-keys: vlr-pages-
+
+      - name: Scrape, simulate, publish
+        run: uv run --no-sync valchamps update ${{ inputs.force && '--force' || '' }}
+
+      - name: Commit updated odds
+        if: ${{ !cancelled() }}
+        run: |
+          git add odds/
+          if git diff --cached --quiet; then
+            echo "odds unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update Champions 2026 odds [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
