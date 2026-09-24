@@ -1,4 +1,5 @@
-"""Published odds: ``latest.json`` and an append-only ``history.csv`` per event.
+"""Published odds per event: ``latest.json``, an append-only ``history.csv``, and
+``matchups.json`` (every pairing's series prediction, for a dashboard without the API).
 
 A forecast is published only when the set of finished results differs from the last one
 published, so a scheduled job that runs every hour writes (and commits) only when a match has
@@ -41,6 +42,16 @@ def publish(forecast: EventForecast, out_dir: Path, *, force: bool = False) -> b
     rows = rows[HISTORY_COLUMNS].round(5)
     history = out_dir / "history.csv"
     rows.to_csv(history, mode="a", header=not history.exists(), index=False, lineterminator="\n")
+    return True
+
+
+def write_matchups(forecast: EventForecast, out_dir: Path) -> bool:
+    """Write every pairing's prediction (``matchups.json``), if the forecast has them."""
+    if forecast.matchups is None:
+        return False
+    out_dir.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(forecast.matchups, separators=(",", ":"))  # compact: rewritten each update
+    (out_dir / "matchups.json").write_text(text + "\n", encoding="utf-8")
     return True
 
 

@@ -9,7 +9,13 @@ from valchamps.series.backtest import (
     veto_summary,
 )
 from valchamps.series.params import SeriesParams
-from valchamps.series.predict import SeriesPrediction, map_probabilities, predict_series
+from valchamps.series.predict import (
+    SeriesPrediction,
+    map_probabilities,
+    predict_matchups,
+    predict_series,
+    prediction_payload,
+)
 from valchamps.series.series import (
     score_distribution,
     series_win_prob,
@@ -37,7 +43,9 @@ __all__ = [
     "format_series_table",
     "map_play_probabilities",
     "map_probabilities",
+    "predict_matchups",
     "predict_series",
+    "prediction_payload",
     "run_series_backtest",
     "score_distribution",
     "series_win_prob",

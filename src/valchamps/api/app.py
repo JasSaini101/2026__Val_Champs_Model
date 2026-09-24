@@ -33,7 +33,7 @@ from valchamps.features import (
     load_records,
     team_regions,
 )
-from valchamps.series import FORMATS, SeriesParams, map_play_probabilities, predict_series
+from valchamps.series import FORMATS, SeriesParams, predict_series, prediction_payload
 
 CHAMPIONS_2026 = 2766
 
@@ -193,34 +193,9 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             event_id=event_id,
             tier=info.tier if info else None,
         )
-        played = map_play_probabilities(pred.vetoes)
-        name = lambda t: st["teams"].get(t, {}).get("name", str(t))  # noqa: E731
+        names = {t: v["name"] for t, v in st["teams"].items()}
         return {
-            "team_a": {"team_id": team_a, "name": name(team_a)},
-            "team_b": {"team_id": team_b, "name": name(team_b)},
-            "best_of": best_of,
-            "p_a": pred.p_a,
-            "p_b": 1 - pred.p_a,
-            "elo_p_a": pred.elo_p,
-            "scores": [
-                {"a": a, "b": b, "p": p}
-                for (a, b), p in sorted(pred.scores.items(), key=lambda kv: kv[0][1] - kv[0][0])
-            ],
-            "maps": [
-                {
-                    "map": m,
-                    "pick_a": pred.map_probs[(m, "pick_a")],
-                    "pick_b": pred.map_probs[(m, "pick_b")],
-                    "decider": pred.map_probs[(m, "decider")],
-                    "in_series": played.get(m, 0.0),
-                }
-                for m in sorted(pool, key=lambda m: -played.get(m, 0.0))
-            ],
-            "vetoes": [
-                {"p": o.prob, "maps": [{"map": m, "picked_by": c} for m, c in o.maps]}
-                for o in pred.vetoes[:vetoes]
-            ],
-            "map_pool": list(pool),
+            **prediction_payload(pred, pool, names, vetoes),
             "model": {
                 "name": st["bundle"]["name"],
                 "trained_through": st["bundle"]["trained_through"],

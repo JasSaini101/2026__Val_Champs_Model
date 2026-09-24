@@ -1,0 +1,6 @@
+# The charts' accent blue instead of Streamlit's red, in each mode (same as `valchamps dashboard`).
+[theme.light]
+primaryColor = "#2a78d6"
+
+[theme.dark]
+primaryColor = "#3987e5"

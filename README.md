@@ -4,13 +4,22 @@
 
 An end-to-end ML system that estimates **P(Team A beats Team B) on each map**, rolls those odds up to Bo3/Bo5 series, and runs a **Monte Carlo simulation of the full Champions 2026 bracket** to give each team's chance of lifting the trophy. It updates while the event runs: finished matches are pulled in, ratings refresh, and the bracket is re-simulated from where it stands.
 
+![Title odds in the dashboard](docs/images/dashboard_title_odds.png)
+
+```mermaid
+flowchart LR
+    A[vlr.gg] -->|rate-limited, cached scraper| B[(SQL<br/>SQLite / Postgres)]
+    B --> C[Point-in-time features<br/>Elo, form, map pool, roster]
+    C --> D[Map model<br/>Elo → LightGBM → PyTorch]
+    D --> E[Series model<br/>exact veto enumeration → Bo3/Bo5]
+    E --> F[Monte Carlo bracket<br/>100k tournaments]
+    F --> G[odds/ JSON + CSV]
+    G --> H[FastAPI]
+    G --> I[Streamlit dashboard]
+    J([GitHub Actions, hourly]) -.->|scrape → re-simulate → commit| G
 ```
-vlr.gg ─► scraper (rate-limited, cached) ─► parser ─► SQL (SQLite/Postgres)   [DVC]
-        ─► point-in-time features ─► map model (Elo → LightGBM → PyTorch)       [MLflow]
-        ─► series model (veto sim → Bo3/Bo5) ─► Monte Carlo bracket ─► odds
-        ─► FastAPI ─► Streamlit dashboard
-GitHub Actions cron: scrape new results → update → re-simulate → publish odds
-```
+
+**Stack:** Python 3.11, httpx, BeautifulSoup, SQLAlchemy, pandas, LightGBM, PyTorch, scikit-learn, numpy, DVC + DagsHub, MLflow, FastAPI, Streamlit + Altair, GitHub Actions, Docker, pytest.
 
 ## Status
 
@@ -24,6 +33,39 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 | 6 | Monte Carlo bracket simulator | ✅ |
 | 7 | Scheduled live-update pipeline | ✅ |
 | 8 | FastAPI + Streamlit dashboard | ✅ |
+
+## Results
+
+Every number below comes from **walk-forward backtests**: for each event from mid-2025 on, a model is trained only on maps played before that event and scored on it (15 events, 1,396 maps, 531 series). Lower log loss and Brier are better; a coin flip scores 0.693 and 0.25.
+
+**Map level** (`valchamps backtest`):
+
+| Model | Log loss | Brier | Accuracy | Log loss, cross-region maps (189) |
+|---|---|---|---|---|
+| Elo | 0.677 | 0.242 | 58.2% | 0.694 |
+| Elo, calibrated | 0.675 | 0.241 | 58.2% | 0.687 |
+| Logistic regression | 0.693 | 0.248 | 56.5% | 0.705 |
+| LightGBM | 0.679 | 0.243 | 58.5% | 0.697 |
+| **PyTorch (antisymmetric MLP)** | **0.674** | **0.241** | 56.9% | **0.685** |
+
+**Series level** (`valchamps series-backtest`, 508 Bo3 and 23 Bo5):
+
+| Method | Log loss | Brier | Accuracy |
+|---|---|---|---|
+| Simulated veto + map model | 0.657 | 0.232 | 62.7% |
+| Real veto + map model | 0.656 | 0.232 | 62.9% |
+| Raw Elo | 0.654 | 0.231 | 63.7% |
+
+<img src="docs/images/backtest_calibration.png" alt="Calibration of the PyTorch map model in the backtest" width="380" align="right">
+
+**What the numbers say**
+
+- Pro VALORANT maps are close to coin flips: no model gets far below 0.67 log loss. The probabilities are **well calibrated** (right: predicted vs observed win rate, with the number of maps in each bin), which matters more for a bracket simulation than accuracy.
+- The PyTorch model has the lowest log loss overall and on **cross-region maps**, where raw Elo is no better than a coin flip. Those are the matches that decide Champions, which is why it is the model used for the forecast.
+- At series level the learned model **only matches Elo**; the map-level gain is too small to show through three maps. The simulated veto costs almost nothing against knowing the real veto (0.657 vs 0.656). The honest summary is that the features add little signal beyond a well-tuned Elo at this data size (2,774 maps from 1,086 tier-1 matches); the value of the rest of the system is turning map odds into calibrated bracket odds.
+- The holdout events (Masters London 2026 and the 2026 Stage 2 leagues, 681 maps, never used for model selection) give 0.688 log loss and 54.9% accuracy for the final model.
+
+<br clear="right">
 
 ## Quick start
 
@@ -175,6 +217,7 @@ It also reports how much probability the simulated veto gave to the real map seq
 
 - `latest.json`: the current per-team odds, the time of the update, and the finished results behind them.
 - `history.csv`: every published forecast, one row per team, so the odds can be followed through the event.
+- `matchups.json`: the series prediction for every pairing of the event's teams at Bo3 and Bo5 (the same numbers as `predict-match`), so the hosted dashboard needs no API.
 
 It publishes only when the set of finished results has changed, so running it every hour doesn't produce a commit every hour. The map model stays frozen for the event. Elo, form and the other features still update from every new result, because the whole history is replayed before each simulation.
 
@@ -211,7 +254,18 @@ uv run valchamps dashboard    # Streamlit on http://127.0.0.1:8501, reading from
 - **Title odds** shows the favourite, a bar chart of every team's title chance, a table of every stage, and the title odds over time with one team highlighted.
 - **Match predictor** shows the series odds for any two teams, the final-score distribution, each team's chance on every map and the likeliest vetoes.
 
+![Match predictor in the dashboard](docs/images/dashboard_match_predictor.png)
+
 The chart colours come from a palette checked for colour blindness, in both light and dark mode. Both servers bind to localhost by default; pass `--host 0.0.0.0` to expose them.
+
+### Hosted dashboard
+
+With `VALCHAMPS_DATA_URL` set to a published `odds/` folder (a path or URL), the dashboard reads `latest.json`, `history.csv` and `matchups.json` from it instead of calling the API. The hosted version runs this way against the files the update job commits, so it needs no database, model or server of its own:
+
+1. On [share.streamlit.io](https://share.streamlit.io), create an app from this repository, branch `main`, entrypoint `deploy/streamlit/streamlit_app.py`.
+2. That's all: `deploy/streamlit/requirements.txt` installs only Streamlit, pandas, Altair and httpx, and the app reads `https://raw.githubusercontent.com/JasSaini101/2026__Val_Champs_Model/main/odds`. Each hourly commit shows up within a few minutes.
+
+To try the same mode locally: `VALCHAMPS_DATA_URL=odds uv run streamlit run deploy/streamlit/streamlit_app.py`.
 
 ## Testing
 
@@ -232,9 +286,10 @@ src/valchamps/
   bracket/          tournament format, pairwise odds, Monte Carlo bracket simulation
   api/              FastAPI app: published odds, match predictions
   dashboard/        Streamlit dashboard and its charts
+deploy/streamlit/   hosted dashboard entrypoint (reads the published odds from GitHub)
 configs/events.yaml events to scrape
 configs/bracket.yaml Champions format and playoff seeding
-odds/<event>/       published live odds (latest.json, history.csv), committed by the update job
+odds/<event>/       published live odds (latest.json, history.csv, matchups.json), committed by the update job
 .github/workflows/  CI; update-odds.yml is the hourly live-update job
 tests/              pytest suite + HTML fixtures
 dvc.yaml            pipeline (ingest -> features -> train)

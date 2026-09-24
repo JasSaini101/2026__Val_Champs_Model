@@ -1,7 +1,9 @@
 """Streamlit dashboard: title odds, how they moved, and a match predictor.
 
 Run with ``valchamps dashboard`` (or ``streamlit run src/valchamps/dashboard/app.py``). Every
-number comes from the API (``VALCHAMPS_API_URL``, default http://localhost:8000).
+number comes from the API (``VALCHAMPS_API_URL``, default http://localhost:8000), or, when
+``VALCHAMPS_DATA_URL`` is set, from the published ``odds/`` folder it points to (the hosted
+version reads the repository on GitHub, so it needs no API or database).
 """
 
 from __future__ import annotations
@@ -10,9 +12,16 @@ import pandas as pd
 import streamlit as st
 
 from valchamps.dashboard.charts import PALETTE, history_lines, score_bars, title_bars
-from valchamps.dashboard.client import DEFAULT_API_URL, ApiClient, ApiError
+from valchamps.dashboard.client import (
+    DEFAULT_API_URL,
+    DEFAULT_DATA_URL,
+    ApiClient,
+    ApiError,
+    StaticClient,
+)
 
 CHAMPIONS_2026 = 2766
+REPO_URL = "https://github.com/JasSaini101/2026__Val_Champs_Model"
 
 st.set_page_config(page_title="Champions 2026 odds", layout="wide")
 
@@ -25,15 +34,19 @@ def _theme() -> dict[str, str]:
     return PALETTE["dark" if kind == "dark" else "light"]
 
 
+def _client(source: str) -> ApiClient | StaticClient:
+    return StaticClient(source) if DEFAULT_DATA_URL else ApiClient(source)
+
+
 @st.cache_data(ttl=60, show_spinner=False)
-def _fetch(api_url: str, what: str, event: int):
-    client = ApiClient(api_url)
+def _fetch(source: str, what: str, event: int):
+    client = _client(source)
     return {"odds": client.odds, "history": client.history, "teams": client.teams}[what](event)
 
 
 @st.cache_data(ttl=300, show_spinner="Simulating the veto and scoring every map...")
-def _predict(api_url: str, a: int, b: int, best_of: int, event: int) -> dict:
-    return ApiClient(api_url).predict(a, b, best_of, event)
+def _predict(source: str, a: int, b: int, best_of: int, event: int) -> dict:
+    return _client(source).predict(a, b, best_of, event)
 
 
 def _pct(x: float) -> str:
@@ -41,13 +54,23 @@ def _pct(x: float) -> str:
 
 
 with st.sidebar:
-    api_url = st.text_input("API URL", DEFAULT_API_URL)
+    if DEFAULT_DATA_URL:
+        api_url = DEFAULT_DATA_URL
+        st.caption("Reading the odds published by the hourly update job.")
+    else:
+        api_url = st.text_input("API URL", DEFAULT_API_URL)
     event = int(st.number_input("Event id", value=CHAMPIONS_2026, step=1))
     if st.button("Refresh"):
         st.cache_data.clear()
 colors = _theme()
 
 st.title("VALORANT Champions 2026")
+st.markdown(
+    "Each team's chance of winning Champions, from **100,000 simulated tournaments**. A model "
+    "trained on 2025-26 pro matches gives the odds of each map, a simulated map veto turns those "
+    "into Bo3/Bo5 odds, and the bracket is replayed from the results so far. It re-runs "
+    f"whenever a match finishes. [Code and write-up]({REPO_URL})"
+)
 odds_tab, match_tab = st.tabs(["Title odds", "Match predictor"])
 
 with odds_tab:
