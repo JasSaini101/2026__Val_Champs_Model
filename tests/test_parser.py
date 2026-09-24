@@ -178,3 +178,15 @@ def test_no_stats_page_still_yields_tags_vetoes_and_rounds(no_stats, completed):
     assert all(v.team_id is not None for v in no_stats.veto if v.action != "remains")
     assert [len(m.rounds) for m in no_stats.maps] == [23, 20, 26]
     assert all(m.players == [] for m in no_stats.maps)
+
+
+def test_player_stats_parse_from_div_scoreboard(completed):
+    """vlr.gg now renders the scoreboard without <table>; the parser must not depend on it."""
+    html = load_fixture("match_378829_completed.html")
+    for tag in ("table", "thead", "tbody", "tr", "th", "td"):
+        html = html.replace(f"<{tag}", "<div").replace(f"</{tag}>", "</div>")
+    assert "<table" not in html
+    parsed = parse_match(html, 378829)
+    assert (parsed.team1.tag, parsed.team2.tag) == ("FNC", "TH")
+    for got, want in zip(parsed.maps, completed.maps, strict=True):
+        assert got.players == want.players

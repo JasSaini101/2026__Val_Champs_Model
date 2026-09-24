@@ -187,9 +187,11 @@ def _team_tags(soup: BeautifulSoup) -> list[str | None]:
         found = [_text(t) for t in label_col.select(".team")]
         if len(found) == 2 and all(found):
             return [found[0], found[1]]
-    for i, table in enumerate(first_game.select("table.wf-table-inset.mod-overview")[:2]):
-        tag = _text(table.select_one("td.mod-player .ge-text-light"))
-        tags[i] = tag or None
+    # Fallback: first and last scoreboard rows belong to team 1 and team 2.
+    rows = _player_rows(first_game)
+    if rows:
+        tags[0] = _text(rows[0].select_one(".mod-player .ge-text-light")) or None
+        tags[1] = _text(rows[-1].select_one(".mod-player .ge-text-light")) or None
     return tags
 
 
@@ -249,23 +251,58 @@ def _half(node: Tag | None, cls: str) -> int | None:
     return _num(_text(node.select_one(f".{cls}")), int) if node else None
 
 
-def _parse_players(table: Tag, team_id: int) -> list[PlayerMapStats]:
+def _player_rows(game: Tag) -> list[Tag]:
+    """Rows of the per-map scoreboard, whatever element vlr.gg uses for them.
+
+    vlr.gg has served the scoreboard both as ``<table>`` rows and as nested ``<div>``s, so a
+    row is found from its player cell: the nearest ancestor that also holds stat cells.
+    """
+    rows: list[Tag] = []
+    for cell in game.select(".mod-player"):
+        row = cell.parent
+        while row is not None and row is not game and row.select_one(".stats-sq") is None:
+            row = row.parent
+        if row is None or row is game or any(row is r for r in rows):
+            continue
+        rows.append(row)
+    return rows
+
+
+def _stat_cells(row: Tag) -> list[Tag]:
+    cells = row.select(".mod-stat")
+    if cells:
+        return cells
+    # No .mod-stat cells: use the outermost stat squares, skipping the agent icons.
+    return [
+        sq
+        for sq in row.select(".stats-sq")
+        if "mod-agent" not in sq.get("class", []) and sq.find_parent(class_="stats-sq") is None
+    ]
+
+
+def _parse_players(game: Tag, team1: Team, team2: Team) -> list[PlayerMapStats]:
+    rows = _player_rows(game)
+    by_tag = {t.tag.lower(): t.team_id for t in (team1, team2) if t.tag}
     players: list[PlayerMapStats] = []
-    for row in table.select("tbody tr"):
-        link = row.select_one("td.mod-player a")
+    for i, row in enumerate(rows):
+        cell = row.select_one(".mod-player")
+        link = cell.select_one("a[href*='/player/']") if cell else None
         player_id = _id_from_href(link.get("href") if link else None)
         if player_id is None:
             continue
-        agent_img = row.select_one("td.mod-agents img")
+        tag = _text(cell.select_one(".ge-text-light")).lower()
+        # Scoreboards list team 1's players first, so position is the fallback.
+        default_team = team1.team_id if i < len(rows) / 2 else team2.team_id
+        agent_img = row.select_one(".mod-agents img") or row.select_one(".mod-agent img")
         values: dict[str, str | None] = {}
-        for col, cell in zip(_STAT_COLUMNS, row.select("td.mod-stat"), strict=False):
-            both = cell.select_one(".mod-both")
-            values[col] = _text(both) if both else _text(cell)
+        for col, stat in zip(_STAT_COLUMNS, _stat_cells(row), strict=False):
+            both = stat.select_one(".mod-both")
+            values[col] = _text(both) if both else _text(stat)
         players.append(
             PlayerMapStats(
                 player_id=player_id,
-                handle=_text(row.select_one("td.mod-player .text-of")),
-                team_id=team_id,
+                handle=_text(cell.select_one(".text-of")),
+                team_id=by_tag.get(tag, default_team),
                 agent=(agent_img.get("title") or agent_img.get("alt")) if agent_img else None,
                 rating=_num(values.get("rating")),
                 acs=_num(values.get("acs")),
@@ -306,12 +343,7 @@ def _parse_map(game: Tag, order: int, team1: Team, team2: Team) -> MapResult | N
     if t1 is None or t2 is None:
         return None
 
-    tables = game.select("table.wf-table-inset.mod-overview")
-    players: list[PlayerMapStats] = []
-    if len(tables) >= 2:
-        players = _parse_players(tables[0], team1.team_id) + _parse_players(
-            tables[1], team2.team_id
-        )
+    players = _parse_players(game, team1, team2)
 
     return MapResult(
         game_id=int(game["data-game-id"]),

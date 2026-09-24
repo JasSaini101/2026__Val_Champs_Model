@@ -16,7 +16,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from valchamps.config import Settings
-from valchamps.data.parser import parse_match
+from valchamps.data.parser import _player_rows, parse_match
 from valchamps.data.scraper import VlrClient
 
 MARKERS = ("mod-overview", "wf-table", "mod-player", "stats-sq", "/player/", "vlr-rounds")
@@ -71,13 +71,25 @@ def main() -> None:
     scripts = [s.get("src") for s in soup.select("script[src]")]
     print(f"\nscript srcs: {scripts[:10]}")
 
-    table = soup.select_one("table")
-    row = table.select_one("tr:has(td)") if table else None
-    if row is not None:
-        print("\nfirst data row of first table:")
-        print(row.prettify()[:3000])
+    game = next((g for g in games if g.get("data-game-id") != "all"), None)
+    rows = _player_rows(game) if game is not None else []
+    print(f"\nscoreboard rows found in first map: {len(rows)}")
+    if rows:
+        row = rows[0]
+        chain = [f"{a.name}.{'.'.join(a.get('class', []))}" for a in [row, *row.parents][:4]]
+        print(f"row element and ancestors: {chain}")
+        header = row.find_previous_sibling() or (
+            row.parent.find_previous_sibling() if row.parent else None
+        )
+        if header is not None:
+            print("\ncolumn header (element before the first row):")
+            print(header.prettify()[:2000])
+        print("\nfirst scoreboard row:")
+        print(row.prettify()[:5000])
 
     match = parse_match(html, 0)
+    if match.maps and match.maps[0].players:
+        print(f"\nfirst parsed player: {match.maps[0].players[0]}")
     print(
         f"\nparser: tags={match.team1.tag!r}/{match.team2.tag!r}, "
         f"players per map={[len(m.players) for m in match.maps]}, "
