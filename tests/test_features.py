@@ -311,3 +311,27 @@ def test_showmatches_are_excluded(tmp_path):
             team1_score=1, team2_score=0, maps=[MapResult(999_999, 1, "Bind", 13, 9, None)],
         ))  # fmt: skip
     assert 999_999 not in {r.match_id for r in load_records(engine)}
+
+
+def test_missing_event_end_date_falls_back_to_last_match(history):
+    from sqlalchemy import update
+
+    from valchamps.data import db
+    from valchamps.features import load_events
+
+    engine, _, records, _ = history
+    event_id = records[0].event_id
+    last = max(r.date for r in records if r.event_id == event_id).date()
+    # Synthetic events have no dates, and every match is finished: last match date is used.
+    assert load_events(engine)[event_id].end_date == last
+
+    # With a match still to play, the event is unfinished and gets no end date.
+    with engine.begin() as conn:
+        conn.execute(update(db.matches).where(db.matches.c.match_id == records[0].match_id)
+                     .values(status="upcoming"))  # fmt: skip
+    try:
+        assert load_events(engine)[event_id].end_date is None
+    finally:
+        with engine.begin() as conn:
+            conn.execute(update(db.matches).where(db.matches.c.match_id == records[0].match_id)
+                         .values(status="completed"))  # fmt: skip

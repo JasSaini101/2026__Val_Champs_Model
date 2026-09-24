@@ -63,6 +63,32 @@ def ingest(
         raise typer.Exit(code=1)
 
 
+@app.command("inspect-event")
+def inspect_event(
+    event_id: int,
+    fetch: bool = typer.Option(False, help="Download the page instead of using the saved copy."),
+) -> None:
+    """Show what the parser reads from an event page (header details and standings)."""
+    from valchamps.data.parser import _soup, event_details, parse_event, parse_standings
+
+    settings = Settings()
+    path = f"/event/{event_id}"
+    with VlrClient(settings) as client:
+        cached = client.cache_path(path)
+        if not fetch and not cached.exists():
+            typer.echo(f"no saved page for {path} (looked for {cached}); use --fetch")
+            raise typer.Exit(code=1)
+        html = client.get(path, max_age=0 if fetch else None)
+    typer.echo(f"page: {cached.name}")
+    typer.echo(f"raw header details: {event_details(_soup(html))}")
+    typer.echo(f"parsed: {parse_event(html, event_id)}")
+    standings = parse_standings(html)
+    typer.echo(f"standings ({len(standings)} rows):")
+    for s in standings:
+        typer.echo(f"  {s.place}-{s.place_max}  {s.team_name} (team {s.team_id})  "
+                   f"points={s.circuit_points} note={s.note}")  # fmt: skip
+
+
 @app.command("build-features")
 def build_features(
     out: Path = typer.Option(DEFAULT_FEATURES, help="Parquet file to write."),

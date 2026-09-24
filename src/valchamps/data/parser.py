@@ -136,7 +136,7 @@ def _parse_date_range(raw: str) -> tuple[date | None, date | None]:
     return start, end
 
 
-def _event_details(soup: BeautifulSoup) -> dict[str, str]:
+def event_details(soup: BeautifulSoup) -> dict[str, str]:
     """Label -> value pairs from the event header ('Dates', 'Prize', 'Location')."""
     details: dict[str, str] = {}
     for item in soup.select(".event-header-main-meta > div"):  # current layout
@@ -152,7 +152,7 @@ def _event_details(soup: BeautifulSoup) -> dict[str, str]:
 def parse_event(html: str, event_id: int) -> Event:
     soup = _soup(html)
     title = soup.select_one("h1.event-header-main-title") or soup.select_one("h1.wf-title")
-    details = _event_details(soup)
+    details = event_details(soup)
     start, end = _parse_date_range(details.get("dates", ""))
     return Event(
         event_id=event_id,
