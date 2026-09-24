@@ -33,7 +33,8 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --locked
+      # The `serve` extra (FastAPI, Streamlit) so the API and dashboard tests run.
+      - run: uv sync --locked --extra serve
       # CPU-only PyTorch for the nn model (the PyPI default for Linux bundles CUDA, ~3 GB).
       - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: uv run --no-sync pytest --cov=valchamps --cov-report=term-missing --cov-report=xml

@@ -23,7 +23,7 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 | 5 | Series model: veto simulation, exact Bo3/Bo5 odds, series backtest | ✅ |
 | 6 | Monte Carlo bracket simulator | ✅ |
 | 7 | Scheduled live-update pipeline | ✅ |
-| 8 | FastAPI + Streamlit dashboard | ⏳ |
+| 8 | FastAPI + Streamlit dashboard | ✅ |
 
 ## Quick start
 
@@ -187,6 +187,32 @@ It publishes only when the set of finished results has changed, so running it ev
 
 It needs the repository secrets `DAGSHUB_USERNAME` and `DAGSHUB_TOKEN`. It only reads from DagsHub and never pushes data back.
 
+## API and dashboard
+
+Install the extra first: `uv sync --extra serve --extra nn`. Then run the API and the dashboard in two terminals:
+
+```bash
+uv run valchamps serve        # FastAPI on http://127.0.0.1:8000 (interactive docs at /docs)
+uv run valchamps dashboard    # Streamlit on http://127.0.0.1:8501, reading from the API
+```
+
+| Endpoint | Returns |
+|---|---|
+| `GET /health` | `{"status": "ok"}` |
+| `GET /events/{id}/odds` | the latest published forecast (`odds/<id>/latest.json`) |
+| `GET /events/{id}/odds/history` | every published forecast, one row per team per update |
+| `GET /events/{id}/teams` | the event's teams and groups |
+| `GET /predict?team_a=&team_b=&best_of=3` | series odds, score distribution, per-map odds and likeliest vetoes (as `predict-match`) |
+
+**Data sources**: published odds come from `odds/` (`VALCHAMPS_ODDS_DIR`). Predictions replay the database and use `models/map_model.pkl` (`VALCHAMPS_MODEL_PATH`). That state loads on the first request, which takes a few seconds; after that a prediction takes well under a second. The API reloads it when the database or model file changes, so a scheduled update is picked up without a restart.
+
+**Dashboard**: two tabs.
+
+- **Title odds** shows the favourite, a bar chart of every team's title chance, a table of every stage, and the title odds over time with one team highlighted.
+- **Match predictor** shows the series odds for any two teams, the final-score distribution, each team's chance on every map and the likeliest vetoes.
+
+The chart colours come from a palette checked for colour blindness, in both light and dark mode. Both servers bind to localhost by default; pass `--host 0.0.0.0` to expose them.
+
 ## Testing
 
 The parser tests run against HTML fixtures in `tests/fixtures/vlr/`. The fixtures copy vlr.gg's markup, but their numbers and ids are **synthetic** (see the banner at the top of each file). HTTP is mocked with `respx`, so the suite never touches the network. Before relying on a full scrape, save a few real pages as extra fixtures and check that the selectors still match the live site.
@@ -204,6 +230,8 @@ src/valchamps/
   models/           baselines, linear, LightGBM, PyTorch; walk-forward backtests; MLflow
   series/           veto simulation, exact Bo3/Bo5 odds, series backtest, match predictions
   bracket/          tournament format, pairwise odds, Monte Carlo bracket simulation
+  api/              FastAPI app: published odds, match predictions
+  dashboard/        Streamlit dashboard and its charts
 configs/events.yaml events to scrape
 configs/bracket.yaml Champions format and playoff seeding
 odds/<event>/       published live odds (latest.json, history.csv), committed by the update job
