@@ -134,6 +134,14 @@ def test_predictions_are_symmetric(frame, config, name):
     np.testing.assert_allclose(p + p[partner], 1.0, atol=1e-9)
 
 
+@pytest.mark.parametrize("name", [pytest.param(n, marks=needs_model(n)) for n in MODEL_NAMES])
+def test_fitted_models_survive_pickling(frame, config, name):
+    """`valchamps train` saves models with pickle (the nn once failed to serialise)."""
+    model = make_model(name, config).fit(frame)
+    restored = pickle.loads(pickle.dumps(model))
+    np.testing.assert_allclose(restored.predict(frame), model.predict(frame))
+
+
 @needs_model("nn")
 def test_nn_is_antisymmetric_without_averaging(frame, config):
     model = make_model("nn", config).fit(frame)
@@ -242,7 +250,8 @@ def test_cli_backtest_logs_runs_to_mlflow(cli_env):
     assert (tmp / "reports" / "backtest" / "elo" / "reliability.png").exists()
 
 
-def test_cli_train_saves_and_registers_model(cli_env, frame):
+@pytest.mark.parametrize("name", [pytest.param(n, marks=needs_model(n)) for n in ("gbm", "nn")])
+def test_cli_train_saves_and_registers_model(cli_env, frame, name):
     import mlflow
 
     from valchamps.cli import app
@@ -250,14 +259,14 @@ def test_cli_train_saves_and_registers_model(cli_env, frame):
     features, params, tmp = cli_env
     out, metrics = tmp / "map_model.pkl", tmp / "metrics.json"
     result = CliRunner().invoke(app, [
-        "train", "--model", "gbm", "--features", str(features), "--params-file", str(params),
+        "train", "--model", name, "--features", str(features), "--params-file", str(params),
         "--out", str(out), "--metrics-file", str(metrics),
     ])  # fmt: skip
     assert result.exit_code == 0, result.output
     assert "registered map-model v1" in result.output
 
     bundle = pickle.loads(out.read_bytes())
-    assert bundle["name"] == "gbm"
+    assert bundle["name"] == name
     p = symmetric_predict(bundle["model"], frame)
     assert ((p > 0) & (p < 1)).all()
     assert json.loads(metrics.read_text())["holdout"]["overall"]["n"] > 0

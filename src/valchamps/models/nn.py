@@ -51,7 +51,33 @@ class NNModel:
         self.seed = seed
         self.prep = numeric_preprocessor()
         self.maps_: dict[str, int] = {}
+        self.n_inputs_: int | None = None
         self.net = None
+
+    # --- pickling -----------------------------------------------------------------------------
+    # The torch module class is defined inside _build (so torch is only imported when used),
+    # which pickle can't serialise. Save the learned weights instead and rebuild on load.
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        net = state.pop("net")
+        state["net_weights"] = (
+            None
+            if net is None
+            else {k: v.detach().cpu().numpy() for k, v in net.state_dict().items()}
+        )
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        weights = state.pop("net_weights", None)
+        self.__dict__.update(state)
+        self.net = None
+        if weights is not None:
+            torch = _torch()
+            net = self._build(self.n_inputs_)
+            net.load_state_dict({k: torch.from_numpy(v) for k, v in weights.items()})
+            net.eval()
+            self.net = net
 
     # --- tensors ------------------------------------------------------------------------------
 
@@ -120,7 +146,8 @@ class NNModel:
             vxa, vxb, vmaps = vxa[vsel], vxb[vsel], vmaps[vsel]
             vy = torch.tensor(val["y"].to_numpy()[_first_views(val)], dtype=torch.float32)
 
-        net = self._build(xa.shape[1])
+        self.n_inputs_ = int(xa.shape[1])
+        net = self._build(self.n_inputs_)
         opt = torch.optim.Adam(
             net.parameters(), lr=self.params["lr"], weight_decay=self.params["weight_decay"]
         )
