@@ -35,7 +35,16 @@ _ID_IN_HREF = re.compile(r"/(?:team|player|event)/(?:matches/)?(\d+)")
 _VETO_STEP = re.compile(r"^(?P<who>.+?)\s+(?P<action>ban|pick)\s+(?P<map>.+)$", re.IGNORECASE)
 _VETO_REMAINS = re.compile(r"^(?P<map>.+?)\s+remains$", re.IGNORECASE)
 
-# Column order of the per-map overview tables (after the player and agent cells).
+# vlr.gg's ``data-col`` labels on scoreboard cells, mapped to our field names.
+_DATA_COLS = {
+    "rating2": "rating", "rating": "rating", "acs": "acs", "kills": "kills",
+    "deaths": "deaths", "assists": "assists", "kd-diff": "plus_minus", "kast": "kast",
+    "adr": "adr", "hsp": "hs_pct", "fb": "first_kills", "fd": "first_deaths",
+    "fk-diff": "fk_plus_minus",
+}  # fmt: skip
+
+# Column order of the legacy <table> scoreboard (after the player and agent cells), used when
+# cells carry no data-col labels.
 _STAT_COLUMNS = (
     "rating", "acs", "kills", "deaths", "assists", "plus_minus",
     "kast", "adr", "hs_pct", "first_kills", "first_deaths", "fk_plus_minus",
@@ -280,6 +289,39 @@ def _stat_cells(row: Tag) -> list[Tag]:
     ]
 
 
+def _cell_value(cell: Tag) -> str:
+    both = cell.select_one(".mod-both")  # vlr shows both-sides, attack and defence values
+    return _text(both) if both else _text(cell)
+
+
+def _row_values(row: Tag) -> dict[str, str]:
+    """Stat values of one scoreboard row, keyed by field name."""
+    labelled = {}
+    for cell in row.select("[data-col]"):
+        field = _DATA_COLS.get(cell["data-col"])
+        if field and field not in labelled:
+            labelled[field] = _cell_value(cell)
+    if labelled:
+        return labelled
+    return {
+        col: _cell_value(cell) for col, cell in zip(_STAT_COLUMNS, _stat_cells(row), strict=False)
+    }
+
+
+def _check_row(values: dict[str, str], player_id: int) -> None:
+    """Catch misaligned columns: the +/- columns must equal the differences they summarise."""
+    for a, b, diff in (
+        ("kills", "deaths", "plus_minus"),
+        ("first_kills", "first_deaths", "fk_plus_minus"),
+    ):
+        x, y, d = (_num(values.get(k), int) for k in (a, b, diff))
+        if None not in (x, y, d) and x - y != d:
+            raise ParseError(
+                f"scoreboard columns look misaligned for player {player_id}: "
+                f"{a}={x}, {b}={y}, {diff}={d}"
+            )
+
+
 def _parse_players(game: Tag, team1: Team, team2: Team) -> list[PlayerMapStats]:
     rows = _player_rows(game)
     by_tag = {t.tag.lower(): t.team_id for t in (team1, team2) if t.tag}
@@ -294,10 +336,8 @@ def _parse_players(game: Tag, team1: Team, team2: Team) -> list[PlayerMapStats]:
         # Scoreboards list team 1's players first, so position is the fallback.
         default_team = team1.team_id if i < len(rows) / 2 else team2.team_id
         agent_img = row.select_one(".mod-agents img") or row.select_one(".mod-agent img")
-        values: dict[str, str | None] = {}
-        for col, stat in zip(_STAT_COLUMNS, _stat_cells(row), strict=False):
-            both = stat.select_one(".mod-both")
-            values[col] = _text(both) if both else _text(stat)
+        values = _row_values(row)
+        _check_row(values, player_id)
         players.append(
             PlayerMapStats(
                 player_id=player_id,
