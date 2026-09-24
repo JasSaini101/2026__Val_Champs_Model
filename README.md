@@ -20,7 +20,7 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 | 2 | Data: vlr.gg scraper, parser, SQL schema, DVC stage | ✅ |
 | 3 | Point-in-time features (Elo, form, map pool, rosters) | ✅ |
 | 4 | Map model: Elo → linear → LightGBM → PyTorch, walk-forward backtests, MLflow on DagsHub | ✅ |
-| 5 | Series model (veto simulation) | ⏳ |
+| 5 | Series model: veto simulation, exact Bo3/Bo5 odds, series backtest | ✅ |
 | 6 | Monte Carlo bracket simulator | ⏳ |
 | 7 | Scheduled live-update pipeline | ⏳ |
 | 8 | FastAPI + Streamlit dashboard | ⏳ |
@@ -35,7 +35,10 @@ uv run valchamps ingest --event 2274   # scrape one event (VCT 2025 Americas Kic
 uv run valchamps ingest       # scrape every event in configs/events.yaml
 uv run valchamps build-features   # training table -> data/features/maps.parquet
 uv run valchamps backtest     # walk-forward comparison of all models (logs to MLflow)
-uv run valchamps train --model gbm   # holdout check, then fit on everything -> models/map_model.pkl
+uv sync --extra nn            # PyTorch, for the nn map model
+uv run valchamps train --model nn    # holdout check, then fit on everything -> models/map_model.pkl
+uv run valchamps series-backtest     # walk-forward Bo3/Bo5 odds: simulated veto vs actual maps vs Elo
+uv run valchamps predict-match "G2 Esports" "Paper Rex" --best-of 3
 ```
 
 Or with Docker:
@@ -121,7 +124,36 @@ Hyper-parameters are in `params.yaml` and tracked by DVC. The same `FeatureBuild
 
 Inputs are the 54 point-in-time features plus `map_name` (categorical), `is_international` and `cross_region`. Every prediction is symmetric: P(A beats B) + P(B beats A) = 1. Scores (log loss, Brier, accuracy, calibration error) are reported **overall, on cross-region maps and on international events**, since Champions is decided by cross-region matches.
 
-Runs go to MLflow. Set `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` to log to DagsHub; otherwise runs go to a local `mlflow.db` (`uv run mlflow ui --backend-store-uri sqlite:///mlflow.db`). `train` registers the final model as `map-model`. PyTorch is optional: `uv sync --extra nn`.
+Runs go to MLflow. Set `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` to log to DagsHub; otherwise runs go to a local `mlflow.db` (`uv run mlflow ui --backend-store-uri sqlite:///mlflow.db`). `train` registers the final model as `map-model`. PyTorch is optional: `uv sync --extra nn`. The DVC `train` stage trains `nn`, which is the model the series model uses.
+
+## Series model
+
+`src/valchamps/series/` turns per-map odds into Bo3/Bo5 odds.
+
+**Veto simulation** (`veto.py`) uses the VCT formats, with seven maps in the pool and the teams alternating:
+
+```
+Bo3: ban, ban, pick, pick, ban, ban, decider
+Bo5: ban, ban, pick, pick, pick, pick, decider
+```
+
+At each step the acting team picks or bans from the remaining maps in proportion to how often it has picked or banned each one before (counts from the map-pool tracker). `series.veto_prior` in `params.yaml` adds pseudo-vetoes to every map, which pulls the choice toward uniform. Who vetoes first is a coin flip. Every possible veto is enumerated exactly, not sampled, and reduced to what the series depends on: the maps in play order and who picked each.
+
+**Map odds for unplayed maps**: `FeatureBuilder.hypothetical_rows` builds feature rows from the current state, without updating it, for every map in the pool in each pick context (team A's pick, team B's pick, decider). The map model scores those rows.
+
+**Series odds** (`series.py`) are computed exactly from the per-map probabilities (Bo3 with a constant p gives p²(3 − 2p)) and averaged over the veto outcomes. Veto averaging and the map model are both symmetric, so P(A beats B) + P(B beats A) = 1.
+
+`valchamps series-backtest` uses the map model's walk-forward folds. For each test event it trains the map model on earlier maps and scores every Bo3/Bo5 in the event three ways:
+
+| Method | Maps used |
+|---|---|
+| `veto` | the simulated veto; this is what a forecast of an upcoming match uses |
+| `actual_maps` | the maps the real veto produced, in order, including an unplayed decider |
+| `elo` | the Elo probability without map information, the same on every map |
+
+It also reports how much probability the simulated veto gave to the real map sequence, compared with a uniform veto.
+
+`valchamps predict-match TEAM_A TEAM_B --best-of 3` prints series odds, the final-score distribution, a per-map table and the likeliest vetoes for an upcoming match. Teams can be given by name, tag or vlr.gg id. By default it uses the saved map model and the pool from the most recent vetoed match; `--maps` sets a different pool.
 
 ## Testing
 
@@ -138,8 +170,9 @@ src/valchamps/
   data/             scraper, parser, models, db, ingest
   features/         Elo, form, map pool, roster trackers; training-table builder
   models/           baselines, linear, LightGBM, PyTorch; walk-forward backtests; MLflow
+  series/           veto simulation, exact Bo3/Bo5 odds, series backtest, match predictions
 configs/events.yaml events to scrape
 tests/              pytest suite + HTML fixtures
 dvc.yaml            pipeline (ingest -> features -> train)
-params.yaml         feature and model hyper-parameters
+params.yaml         feature, model and series hyper-parameters
 ```
