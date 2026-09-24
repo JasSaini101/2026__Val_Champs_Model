@@ -26,6 +26,11 @@ mlops = ["dvc>=3.50"]
 nn = [
     "torch>=2.14.0",
 ]
+serve = [
+    "fastapi>=0.115",
+    "streamlit>=1.40",
+    "uvicorn>=0.30",
+]
 
 [project.scripts]
 valchamps = "valchamps.cli:app"
