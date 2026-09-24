@@ -59,6 +59,8 @@ class MatchRecord:
     maps: tuple[MapRecord, ...] = ()
     # (team_id, action, map_name) in veto order; action is "ban" or "pick".
     vetoes: tuple[tuple[int, str, str], ...] = ()
+    # Every map named in the veto (bans, picks and the leftover decider): the pool in play.
+    map_pool: tuple[str, ...] = ()
     # team_id -> {player_id: mean rating over the maps they played in this match}
     lineups: dict[int, dict[int, float | None]] = field(default_factory=dict)
 
@@ -147,6 +149,9 @@ def load_records(engine: Engine) -> list[MatchRecord]:
                     for v in veto_rows.itertuples(index=False)
                     if v.action in ("ban", "pick") and pd.notna(v.team_id)
                 )
+                if veto_rows is not None
+                else (),
+                map_pool=tuple(m for m in veto_rows.map_name if pd.notna(m))
                 if veto_rows is not None
                 else (),
                 lineups=lineups.get(int(row.match_id), {}),

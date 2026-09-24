@@ -26,7 +26,7 @@ stages:
       - data/features/maps.parquet
 
   train:
-    cmd: valchamps train --model gbm
+    cmd: valchamps train --model nn
     deps:
       - data/features/maps.parquet
       - src/valchamps/models

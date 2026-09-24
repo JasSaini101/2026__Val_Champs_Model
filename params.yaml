@@ -47,3 +47,10 @@ models:
       epochs: 300
       patience: 20
       batch_size: 256
+
+# Series model (Phase 5). `valchamps series-backtest` / `valchamps predict-match` read this.
+series:
+  # Pseudo-vetoes per map added to each team's pick and ban counts before the simulated veto
+  # draws from them: 0 follows a team's history exactly, large values make every choice uniform.
+  # 5 gave the real veto the highest likelihood over the pre-holdout backtest (3-10 all close).
+  veto_prior: 5.0

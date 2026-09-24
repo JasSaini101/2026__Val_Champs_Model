@@ -8,8 +8,10 @@ team's point of view, so the model cannot learn anything from which team vlr.gg 
 
 from __future__ import annotations
 
+import copy
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
+from datetime import datetime
 
 import pandas as pd
 
@@ -47,6 +49,9 @@ FEATURE_COLUMNS = (
     + _PAIR_FEATURES
 )
 
+# How a map entered the series, from team_a's point of view.
+PICK_CONTEXTS = ("pick_a", "pick_b", "decider")
+
 
 def _diff(a: float, b: float) -> float:
     return a - b if not (math.isnan(a) or math.isnan(b)) else math.nan
@@ -69,8 +74,50 @@ class FeatureBuilder:
     def rows_for(self, match: MatchRecord) -> list[dict]:
         """Feature rows for every map of ``match`` from the current (pre-match) state."""
         self.elo.start_season(match.date)
+        team_state = self._team_state(match)
         a, b = match.teams
-        team_state = {
+        rows = []
+        for m in match.maps:
+            for perspective, (x, y) in enumerate(((a, b), (b, a))):
+                rows.append(self._row(match, m, x, y, perspective, team_state))
+        return rows
+
+    def hypothetical_rows(
+        self, team_a: int, team_b: int, date: datetime, map_pool: Sequence[str], *,
+        best_of: int = 3, event_id: int | None = None, tier: str | None = None,
+        match_id: int = 0,
+    ) -> pd.DataFrame:  # fmt: skip
+        """Rows for a match not yet played: every map in ``map_pool`` in every pick context.
+
+        Uses the current state and leaves it untouched, so the rows a real match would get are
+        identical whether or not this was called first. Each (map, context) pair gets its own
+        synthetic negative ``game_id`` with both perspectives, like a real map. ``context`` is
+        one of :data:`PICK_CONTEXTS` from ``team_a``'s view (the perspective 0 row); ``y`` is NaN.
+        """
+        builder = self
+        if self.elo.season is not None and date.year != self.elo.season:
+            # A new season would regress ratings; do that on a copy.
+            builder = copy.copy(self)
+            builder.elo = copy.deepcopy(self.elo)
+            builder.elo.start_season(date)
+        match = MatchRecord(match_id, date, event_id, tier, team_a, team_b, best_of)
+        team_state = builder._team_state(match)
+        pickers = {"pick_a": team_a, "pick_b": team_b, "decider": None}
+        rows = []
+        for i, map_name in enumerate(map_pool):
+            for j, context in enumerate(PICK_CONTEXTS):
+                game_id = -(abs(match_id) * 100 + i * len(PICK_CONTEXTS) + j + 1)
+                m = MapRecord(game_id, 0, map_name, 0, 0, pickers[context])
+                for perspective, (x, y) in enumerate(((team_a, team_b), (team_b, team_a))):
+                    row = builder._row(match, m, x, y, perspective, team_state)
+                    row["y"] = math.nan
+                    row["context"] = context
+                    rows.append(row)
+        return pd.DataFrame(rows, columns=[*META_COLUMNS, *FEATURE_COLUMNS, "context"])
+
+    def _team_state(self, match: MatchRecord) -> dict[int, dict[str, float]]:
+        a, b = match.teams
+        return {
             t: {
                 "elo": self.elo.rating[t],
                 "region_offset": self.elo.offset(t),
@@ -80,11 +127,6 @@ class FeatureBuilder:
             }
             for t, o in ((a, b), (b, a))
         }
-        rows = []
-        for m in match.maps:
-            for perspective, (x, y) in enumerate(((a, b), (b, a))):
-                rows.append(self._row(match, m, x, y, perspective, team_state))
-        return rows
 
     def _row(
         self, match: MatchRecord, m: MapRecord, a: int, b: int, perspective: int,
@@ -141,8 +183,13 @@ class FeatureBuilder:
 def build_feature_frame(
     records: Iterable[MatchRecord], regions: dict[int, str], params: FeatureParams | None = None,
     events: dict[int, EventInfo] | None = None,
+    on_match: Callable[[FeatureBuilder, MatchRecord], None] | None = None,
 ) -> tuple[pd.DataFrame, FeatureBuilder]:  # fmt: skip
-    """Replay ``records`` (oldest first) and return the training table and final state."""
+    """Replay ``records`` (oldest first) and return the training table and final state.
+
+    ``on_match(builder, match)`` is called with the pre-match state of every match, after its
+    rows are taken and before its result is applied.
+    """
     builder = FeatureBuilder(params or FeatureParams(), regions, events)
     rows: list[dict] = []
     previous = None
@@ -152,6 +199,8 @@ def build_feature_frame(
             raise ValueError("records must be sorted oldest first")
         previous = key
         rows.extend(builder.rows_for(match))
+        if on_match is not None:
+            on_match(builder, match)
         builder.update(match)
     frame = pd.DataFrame(rows, columns=META_COLUMNS + FEATURE_COLUMNS)
     return frame, builder
