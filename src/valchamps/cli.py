@@ -57,7 +57,7 @@ def ingest(
             failed += len(report.failed)
             typer.echo(
                 f"{spec.name}: {report.fetched} fetched, {report.skipped} skipped, "
-                f"{len(report.failed)} failed"
+                f"{report.pending} pending (teams TBD), {len(report.failed)} failed"
             )
     if failed:
         raise typer.Exit(code=1)

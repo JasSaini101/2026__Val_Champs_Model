@@ -1,0 +1,56 @@
+schema: '2.0'
+stages:
+  ingest:
+    cmd: valchamps ingest --events-file configs/events.yaml
+    deps:
+    - path: configs/events.yaml
+      hash: md5
+      md5: 7eb943176042170bc3f73daecee4604b
+      size: 4263
+    - path: src/valchamps/data
+      hash: md5
+      md5: f7f34b5917fc2b0f50723394281d1d6b.dir
+      size: 106581
+      nfiles: 12
+    outs:
+    - path: data/raw/vlr
+      hash: md5
+      md5: da92220bf6ae9539cbc238c723865d9e.dir
+      size: 469194428
+      nfiles: 1222
+    - path: data/valchamps.db
+      hash: md5
+      md5: fcbfeae7566a16970ca47dcac6a3e744
+      size: 4997120
+  features:
+    cmd: valchamps build-features
+    deps:
+    - path: data/valchamps.db
+      hash: md5
+      md5: fcbfeae7566a16970ca47dcac6a3e744
+      size: 4997120
+    - path: src/valchamps/features
+      hash: md5
+      md5: 0921908832590c944bb938b2e359f8da.dir
+      size: 82969
+      nfiles: 18
+    params:
+      params.yaml:
+        features:
+          elo:
+            init: 1500
+            scale: 400
+            k: 32
+            map_k: 16
+            region_k: 16
+            season_carryover: 0.75
+          form_window: 5
+          map_prior: 5
+          h2h_prior: 3
+          intl_prior: 5
+          player_window: 10
+    outs:
+    - path: data/features/maps.parquet
+      hash: md5
+      md5: 82473ab8dac6641c75429879c31f673d
+      size: 712112
