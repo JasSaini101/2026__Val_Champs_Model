@@ -15,6 +15,8 @@ from valchamps.data.scraper import VlrClient
 app = typer.Typer(help="VALORANT Champions 2026 model tooling.", no_args_is_help=True)
 
 DEFAULT_EVENTS = PROJECT_ROOT / "configs" / "events.yaml"
+DEFAULT_PARAMS = PROJECT_ROOT / "params.yaml"
+DEFAULT_FEATURES = PROJECT_ROOT / "data" / "features" / "maps.parquet"
 
 
 @app.callback()
@@ -59,6 +61,31 @@ def ingest(
             )
     if failed:
         raise typer.Exit(code=1)
+
+
+@app.command("build-features")
+def build_features(
+    out: Path = typer.Option(DEFAULT_FEATURES, help="Parquet file to write."),
+    params_file: Path = typer.Option(DEFAULT_PARAMS, help="YAML with a `features` section."),
+) -> None:
+    """Build the per-map training table from the database."""
+    from valchamps.features import FeatureParams, build_feature_frame, load_records, team_regions
+
+    engine = db.get_engine(Settings().db_url)
+    records = load_records(engine)
+    if not records:
+        typer.echo("no completed matches in the database; run `valchamps ingest` first")
+        raise typer.Exit(code=1)
+    params = FeatureParams.from_yaml(params_file) if params_file.exists() else FeatureParams()
+    frame, _ = build_feature_frame(records, team_regions(engine), params)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(out, index=False)
+    maps = frame[frame.perspective == 0]
+    typer.echo(
+        f"wrote {out}: {len(frame)} rows ({len(maps)} maps, {maps.match_id.nunique()} matches), "
+        f"{maps.date.min():%Y-%m-%d} to {maps.date.max():%Y-%m-%d}, "
+        f"{int(maps.cross_region.sum())} cross-region maps"
+    )
 
 
 if __name__ == "__main__":

@@ -14,3 +14,13 @@ stages:
           persist: true
     # The source site changes independently of our inputs, so always rerun.
     always_changed: true
+
+  features:
+    cmd: valchamps build-features
+    deps:
+      - data/valchamps.db
+      - src/valchamps/features
+    params:
+      - features
+    outs:
+      - data/features/maps.parquet

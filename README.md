@@ -18,7 +18,7 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 |---|---|---|
 | 1 | Scaffold: uv, ruff, pytest, pre-commit, CI, Docker | ✅ |
 | 2 | Data: vlr.gg scraper, parser, SQL schema, DVC stage | ✅ |
-| 3 | Point-in-time features (Elo, form, map pool, rosters) | ⏳ |
+| 3 | Point-in-time features (Elo, form, map pool, rosters) | ✅ |
 | 4 | Map model + calibration + MLflow tracking | ⏳ |
 | 5 | Series model (veto simulation) | ⏳ |
 | 6 | Monte Carlo bracket simulator | ⏳ |
@@ -31,16 +31,25 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 uv sync                       # install (Python 3.11+)
 uv run pytest                 # run the test suite
 uv run valchamps init-db      # create data/valchamps.db
-uv run valchamps ingest --event 2097   # scrape one event (Champions 2024)
+uv run valchamps ingest --event 2274   # scrape one event (VCT 2025 Americas Kickoff)
 uv run valchamps ingest       # scrape every event in configs/events.yaml
+uv run valchamps build-features   # training table -> data/features/maps.parquet
 ```
 
 Or with Docker:
 
 ```bash
 docker build -t valchamps .
-docker run --rm -v "$PWD/data:/app/data" valchamps ingest --event 2097
+docker run --rm -v "$PWD/data:/app/data" valchamps ingest --event 2274
 ```
+
+## Data scope
+
+Training data covers 2025 and 2026 (`configs/events.yaml`, 30 events):
+
+- **VCT regional leagues:** Kickoff, Stage 1 and Stage 2 in Americas, EMEA, Pacific and China (24 events). They reflect current rosters and the current meta, and hold most of the tier-1 matches.
+- **International events:** Masters Bangkok 2025, Masters Toronto 2025, Champions 2025, Masters Santiago 2026 and Masters London 2026 (5 events). These are the only matches between teams from different regions. Leagues alone show how a team ranks in its own region, not how the regions compare, and Champions is decided by cross-region matches. These results also show how each region's top teams actually do at international events.
+- **Champions 2026 (event 2766):** the tournament being simulated. Its finished matches count as training data as they're played; its upcoming matches make up the bracket.
 
 ## Data layer
 
@@ -81,6 +90,19 @@ Set with environment variables:
 | `VALCHAMPS_REQUEST_INTERVAL` | `2.0` seconds |
 | `VALCHAMPS_BASE_URL` | `https://www.vlr.gg` |
 
+## Features
+
+`valchamps build-features` replays every completed match oldest first. Before each match it records every team's current state as that match's features, then updates the state with the result. A row can therefore only reflect earlier matches, and a test checks that flipping every later result leaves earlier rows unchanged. Each map gives two rows, one from each team's point of view.
+
+| Group | Features |
+|---|---|
+| Elo (`ratings.py`) | team rating, per-map adjustment, **region offset** (moved only by cross-region maps at Masters and Champions), win probability. Updates scale with round margin; ratings are pulled partway back to the mean each new year |
+| Form (`form.py`) | map win rate and round difference over the last 5 matches, days of rest, matches in the last 30 days, experience, **international map win rate**, head-to-head record |
+| Map pool (`map_pool.py`) | win rate on this map, shrunk toward the team's overall rate; pick and ban rate for this map; whether the map was the team's pick, the opponent's pick, or the decider |
+| Roster (`roster.py`) | share of the lineup unchanged from the previous match; the lineup's average player rating over recent matches |
+
+Hyper-parameters are in `params.yaml` and tracked by DVC. The same `FeatureBuilder` state will score upcoming Champions matches.
+
 ## Testing
 
 The parser tests run against HTML fixtures in `tests/fixtures/vlr/`. The fixtures copy vlr.gg's markup, but their numbers and ids are **synthetic** (see the banner at the top of each file). HTTP is mocked with `respx`, so the suite never touches the network. Before relying on a full scrape, save a few real pages as extra fixtures and check that the selectors still match the live site.
@@ -94,7 +116,9 @@ src/valchamps/
   config.py         settings from env
   cli.py            `valchamps` command
   data/             scraper, parser, models, db, ingest
+  features/         Elo, form, map pool, roster trackers; training-table builder
 configs/events.yaml events to scrape
 tests/              pytest suite + HTML fixtures
-dvc.yaml            data pipeline
+dvc.yaml            data pipeline (ingest -> features)
+params.yaml         feature hyper-parameters
 ```

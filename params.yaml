@@ -1,0 +1,14 @@
+# Hyper-parameters tracked by DVC (`dvc params diff` shows what changed between runs).
+features:
+  elo:
+    init: 1500
+    scale: 400
+    k: 32            # overall team rating
+    map_k: 16        # team-on-this-map adjustment
+    region_k: 16     # region offset, moved only by cross-region maps
+    season_carryover: 0.75
+  form_window: 5     # recent matches
+  map_prior: 5       # pseudo-maps shrinking map win rate toward the team's overall rate
+  h2h_prior: 3       # pseudo-maps shrinking head-to-head win rate toward 50%
+  intl_prior: 5      # pseudo-maps shrinking international win rate toward 50%
+  player_window: 10  # recent matches per player for lineup rating
