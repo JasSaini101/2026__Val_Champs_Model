@@ -1,6 +1,8 @@
 # VALORANT Champions 2026 — Title Odds
 
-[![CI](https://github.com/JasSaini101/2026__Val_Champs_Model/actions/workflows/ci.yml/badge.svg)](https://github.com/JasSaini101/2026__Val_Champs_Model/actions/workflows/ci.yml)
+[![CI](https://github.com/JasSaini101/2026__Val_Champs_Model/actions/workflows/ci.yml/badge.svg)](https://github.com/JasSaini101/2026__Val_Champs_Model/actions/workflows/ci.yml) [![Live dashboard](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://valorant-champs-2026.streamlit.app)
+
+**Live dashboard: [valorant-champs-2026.streamlit.app](https://valorant-champs-2026.streamlit.app)** (title odds updated after every match, plus a match predictor)
 
 An end-to-end ML system that estimates **P(Team A beats Team B) on each map**, rolls those odds up to Bo3/Bo5 series, and runs a **Monte Carlo simulation of the full Champions 2026 bracket** to give each team's chance of lifting the trophy. It updates while the event runs: finished matches are pulled in, ratings refresh, and the bracket is re-simulated from where it stands.
 
@@ -260,7 +262,7 @@ The chart colours come from a palette checked for colour blindness, in both ligh
 
 ### Hosted dashboard
 
-With `VALCHAMPS_DATA_URL` set to a published `odds/` folder (a path or URL), the dashboard reads `latest.json`, `history.csv` and `matchups.json` from it instead of calling the API. The hosted version runs this way against the files the update job commits, so it needs no database, model or server of its own:
+With `VALCHAMPS_DATA_URL` set to a published `odds/` folder (a path or URL), the dashboard reads `latest.json`, `history.csv` and `matchups.json` from it instead of calling the API. The [hosted version](https://valorant-champs-2026.streamlit.app) runs this way against the files the update job commits, so it needs no database, model or server of its own:
 
 1. On [share.streamlit.io](https://share.streamlit.io), create an app from this repository, branch `main`, entrypoint `deploy/streamlit/streamlit_app.py`.
 2. That's all: `deploy/streamlit/requirements.txt` installs only Streamlit, pandas, Altair and httpx, and the app reads `https://raw.githubusercontent.com/JasSaini101/2026__Val_Champs_Model/main/odds`. Each hourly commit shows up within a few minutes.
