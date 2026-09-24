@@ -4,10 +4,10 @@
 # Scope: the 2025 and 2026 VCT regional leagues (Kickoff, Stage 1, Stage 2 in each of the four
 # partnership regions). IDs confirmed on vlr.gg in Sep 2026.
 #
-# International events (Masters, Champions) are not included. They are the only matches between
-# teams from different regions; see README "Data scope" for why that matters.
+# Plus the five most recent international events. They hold the only matches between teams from
+# different regions, which is how the model learns how regions compare (README "Data scope").
 #
-# All partnership league matches are played on LAN in each region's studio.
+# Every event here is played on LAN (league matches in each region's studio).
 events:
   # 2025 ----------------------------------------------------------------------------------------
   - {event_id: 2274, name: "VCT 2025: Americas Kickoff", tier: regional, region: americas, is_lan: true}
@@ -35,3 +35,9 @@ events:
   - {event_id: 2685, name: "VCT 2026: China Kickoff", tier: regional, region: china, is_lan: true}
   - {event_id: 2864, name: "VCT 2026: China Stage 1", tier: regional, region: china, is_lan: true}
   - {event_id: 2978, name: "VCT 2026: China Stage 2", tier: regional, region: china, is_lan: true}
+  # International (cross-region bridge) ---------------------------------------------------------
+  - {event_id: 2281, name: "VALORANT Masters Bangkok 2025", tier: international, region: international, is_lan: true}
+  - {event_id: 2282, name: "VALORANT Masters Toronto 2025", tier: international, region: international, is_lan: true}
+  - {event_id: 2283, name: "VALORANT Champions 2025", tier: champions, region: international, is_lan: true}
+  - {event_id: 2760, name: "VALORANT Masters Santiago 2026", tier: international, region: international, is_lan: true}
+  - {event_id: 2765, name: "VALORANT Masters London 2026", tier: international, region: international, is_lan: true}

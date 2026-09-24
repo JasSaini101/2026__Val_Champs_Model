@@ -44,10 +44,12 @@ docker run --rm -v "$PWD/data:/app/data" valchamps ingest --event 2274
 
 ## Data scope
 
-Training data is the **2025 and 2026 VCT regional leagues**: Kickoff, Stage 1 and Stage 2 in Americas, EMEA, Pacific and China, 24 events in all (`configs/events.yaml`). They were chosen because they reflect current rosters and the current meta, and they hold most of the tier-1 matches.
+Training data covers 2025 and 2026 (`configs/events.yaml`, 29 events):
 
-**Known limitation:** regional leagues never pit teams from different regions against each other, but Champions does. With only league data, a team's rating says how it compares to its own region, not how its region compares to the others. The model needs another source for how strong each region is, such as a per-region adjustment or cross-region results from international events.
+- **VCT regional leagues:** Kickoff, Stage 1 and Stage 2 in Americas, EMEA, Pacific and China (24 events). They reflect current rosters and the current meta, and hold most of the tier-1 matches.
+- **International events:** Masters Bangkok 2025, Masters Toronto 2025, Champions 2025, Masters Santiago 2026 and Masters London 2026 (5 events). These are the only matches between teams from different regions. Leagues alone show how a team ranks in its own region, not how the regions compare, and Champions is decided by cross-region matches. These results also show how each region's top teams actually do at international events.
 
+## Data layer
 
 **Scraper** (`src/valchamps/data/scraper.py`): an `httpx` client that waits at least 2 s between requests, retries 429/5xx and connection errors with exponential backoff, and writes every page to `data/raw/vlr/`. Finished matches are served from that cache forever. Event match lists and live or upcoming matches are refetched, so re-running during an event only downloads what changed.
 
