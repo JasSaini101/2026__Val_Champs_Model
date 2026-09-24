@@ -12,6 +12,7 @@ from sqlalchemy import Engine
 from valchamps.data import db
 from valchamps.data.parser import (
     ParseError,
+    TeamsNotDecided,
     parse_event,
     parse_event_matches,
     parse_match,
@@ -40,6 +41,7 @@ class IngestReport:
     listed: int = 0
     fetched: int = 0
     skipped: int = 0
+    pending: int = 0  # bracket matches whose teams are not decided yet
     failed: list[int] = field(default_factory=list)
 
 
@@ -71,10 +73,16 @@ def ingest_event(
         if listing.match_id in done:
             report.skipped += 1
             continue
+        if not listing.teams_decided:
+            report.pending += 1  # fetched on a later run, once the bracket fills in
+            continue
         # Finished matches never change, so their cached page is always valid.
         max_age = None if listing.status == "completed" else 0
         try:
             match = parse_match(client.get(listing.url_path, max_age=max_age), listing.match_id)
+        except TeamsNotDecided:
+            report.pending += 1
+            continue
         except (ScrapeError, ParseError) as exc:
             log.error("match %s failed: %s", listing.match_id, exc)
             report.failed.append(listing.match_id)
@@ -91,7 +99,8 @@ def ingest_event(
         db.save_standings(conn, spec.event_id, parse_standings(event_html))
 
     log.info(
-        "event %s: %d listed, %d fetched, %d skipped, %d failed",
-        spec.event_id, report.listed, report.fetched, report.skipped, len(report.failed),
+        "event %s: %d listed, %d fetched, %d skipped, %d pending, %d failed",
+        spec.event_id, report.listed, report.fetched, report.skipped, report.pending,
+        len(report.failed),
     )  # fmt: skip
     return report

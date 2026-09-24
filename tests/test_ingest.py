@@ -39,8 +39,10 @@ def test_ingest_event_end_to_end(settings, engine, vlr):
     with client(settings) as c:
         report = ingest_event(c, engine, SPEC)
 
-    assert (report.listed, report.fetched, report.skipped) == (3, 2, 0)
+    assert (report.listed, report.fetched, report.skipped, report.pending) == (4, 2, 0, 1)
     assert report.failed == [378831]
+    # The TBD bracket slot is never requested.
+    assert not any("378999" in str(call.request.url) for call in vlr.calls)
     with engine.connect() as conn:
         ev = conn.execute(select(db.events)).one()
         assert (ev.name, ev.tier, ev.is_lan) == ("Valorant Champions 2024", "champions", True)
@@ -80,3 +82,47 @@ def test_repo_events_config_is_valid():
 
     specs = load_event_specs(DEFAULT_EVENTS)
     assert specs and len({s.event_id for s in specs}) == len(specs)
+
+
+def test_match_page_still_tbd_counts_as_pending(settings, engine, vlr):
+    """The listing names both teams, but the match page has no team links yet."""
+    tbd = load_fixture("match_378830_upcoming.html")
+    for team_href in ('href="/team/1120/edward-gaming"', 'href="/team/2593/fnatic"'):
+        tbd = tbd.replace(team_href, 'href="#"')
+    vlr.get(url__regex=r"^https://vlr.test/378830/").respond(200, text=tbd)
+    with client(settings) as c:
+        report = ingest_event(c, engine, SPEC)
+    assert report.pending == 2  # the TBD listing card plus this page
+    assert report.failed == [378831]  # only the real HTTP failure
+    with engine.connect() as conn:
+        assert not conn.execute(
+            select(db.scrape_log).where(db.scrape_log.c.url_path.contains("378830"))
+        ).first()
+
+
+def test_cli_exit_code_ignores_pending_matches(settings, monkeypatch, tmp_path):
+    """Pending (TBD) matches must not make `valchamps ingest` fail, so `dvc repro` succeeds."""
+    from typer.testing import CliRunner
+
+    from valchamps.cli import app
+
+    events = tmp_path / "events.yaml"
+    events.write_text("events:\n  - {event_id: 2097, name: Champions, tier: champions}\n")
+    monkeypatch.setenv("VALCHAMPS_DB_URL", settings.db_url)
+    monkeypatch.setenv("VALCHAMPS_CACHE_DIR", str(settings.cache_dir))
+    monkeypatch.setenv("VALCHAMPS_BASE_URL", settings.base_url)
+    monkeypatch.setenv("VALCHAMPS_REQUEST_INTERVAL", "0")
+    with respx.mock(base_url="https://vlr.test", assert_all_called=False) as mock:
+        mock.get("/event/2097").respond(200, text=load_fixture("event_2097.html"))
+        mock.get(url__regex=r"/event/matches/2097/").respond(
+            200, text=load_fixture("event_matches_2097.html")
+        )
+        for mid, fixture in ((378829, "match_378829_completed.html"),
+                             (378830, "match_378830_upcoming.html"),
+                             (378831, "match_378830_upcoming.html")):  # fmt: skip
+            mock.get(url__regex=rf"^https://vlr.test/{mid}/").respond(
+                200, text=load_fixture(fixture)
+            )
+        result = CliRunner().invoke(app, ["ingest", "--events-file", str(events)])
+    assert result.exit_code == 0, result.output
+    assert "1 pending (teams TBD), 0 failed" in result.output

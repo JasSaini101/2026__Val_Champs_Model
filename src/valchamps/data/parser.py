@@ -30,6 +30,10 @@ class ParseError(ValueError):
     """The page does not have the structure the parser expects."""
 
 
+class TeamsNotDecided(ParseError):
+    """A bracket match whose teams are not known yet (shown as "TBD"); retry later."""
+
+
 _WS = re.compile(r"\s+")
 _MATCH_PATH = re.compile(r"^/(\d+)/")
 _ID_IN_HREF = re.compile(r"/(?:team|player|event)/(?:matches/)?(\d+)")
@@ -219,8 +223,10 @@ def parse_event_matches(html: str) -> list[MatchListing]:
     for card in _soup(html).select("a.match-item"):
         href = card.get("href", "")
         teams = [_text(t) for t in card.select(".match-item-vs-team-name .text-of")]
-        if len(teams) != 2:
+        if not href or len(teams) > 2:
             continue
+        # Undecided bracket slots may show one or no team name; they are kept as "TBD".
+        teams += ["TBD"] * (2 - len(teams))
         listings.append(
             MatchListing(
                 match_id=match_id_from_path(href),
@@ -243,7 +249,7 @@ def _parse_header_team(soup: BeautifulSoup, side: int) -> Team:
     link = soup.select_one(f"a.match-header-link.mod-{side}")
     team_id = _id_from_href(link.get("href") if link else None)
     if link is None or team_id is None:
-        raise ParseError(f"team {side} link missing from match header")
+        raise TeamsNotDecided(f"team {side} not decided yet (no team link in match header)")
     name = _text(link.select_one(".wf-title-med")) or _text(link)
     return Team(team_id=team_id, name=name)
 

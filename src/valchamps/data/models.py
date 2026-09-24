@@ -45,6 +45,11 @@ class MatchListing:
     status: str  # "completed" | "live" | "upcoming"
     stage: str | None = None
 
+    @property
+    def teams_decided(self) -> bool:
+        """False for bracket slots whose teams are not known yet ("TBD")."""
+        return all(n and n.strip().upper() != "TBD" for n in (self.team1_name, self.team2_name))
+
 
 @dataclass(frozen=True)
 class VetoStep:

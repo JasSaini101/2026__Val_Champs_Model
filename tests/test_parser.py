@@ -8,6 +8,7 @@ from tests.conftest import load_fixture
 from valchamps.data.models import Team
 from valchamps.data.parser import (
     ParseError,
+    TeamsNotDecided,
     _parse_date_range,
     _parse_players,
     match_id_from_path,
@@ -108,13 +109,25 @@ def test_missing_teams_raises():
         parse_match("<html><body>nothing here</body></html>", 1)
 
 
+def test_tbd_match_page_raises_teams_not_decided():
+    """A bracket slot like /754737/tbd-valorant-champions-2026-gf: header links have no team."""
+    html = load_fixture("match_378830_upcoming.html")
+    for team_href in ('href="/team/1120/edward-gaming"', 'href="/team/2593/fnatic"'):
+        html = html.replace(team_href, 'href="#"')
+    with pytest.raises(TeamsNotDecided):
+        parse_match(html, 754737)
+
+
 def test_event_matches_listing():
     listings = parse_event_matches(load_fixture("event_matches_2097.html"))
     assert [(x.match_id, x.status) for x in listings] == [
         (378829, "completed"),
         (378831, "live"),
         (378830, "upcoming"),
-    ]  # TBD placeholder card (one team) is dropped
+        (378999, "upcoming"),  # bracket slot with teams still TBD
+    ]
+    assert [x.teams_decided for x in listings] == [True, True, True, False]
+    assert (listings[3].team1_name, listings[3].team2_name) == ("TBD", "TBD")
     assert listings[0].team1_name == "FNATIC"
     assert listings[0].stage == "Playoffs\u2013Upper Final"  # vlr uses an en dash
 
