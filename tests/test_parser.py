@@ -5,9 +5,11 @@ from datetime import date, datetime
 import pytest
 
 from tests.conftest import load_fixture
+from valchamps.data.models import Team
 from valchamps.data.parser import (
     ParseError,
     _parse_date_range,
+    _parse_players,
     match_id_from_path,
     parse_event,
     parse_event_matches,
@@ -168,7 +170,7 @@ def test_round_sides_match_half_scores(completed):
 
 @pytest.fixture(scope="module")
 def no_stats():
-    """vlr.gg as served in Sep 2026: round strip present, player stats tables absent."""
+    """A page with the round strip but no scoreboard (e.g. stats not posted yet)."""
     return parse_match(load_fixture("match_378829_no_stats.html"), 378829)
 
 
@@ -178,3 +180,49 @@ def test_no_stats_page_still_yields_tags_vetoes_and_rounds(no_stats, completed):
     assert all(v.team_id is not None for v in no_stats.veto if v.action != "remains")
     assert [len(m.rounds) for m in no_stats.maps] == [23, 20, 26]
     assert all(m.players == [] for m in no_stats.maps)
+
+
+def test_player_stats_parse_from_div_scoreboard(completed):
+    """vlr.gg now renders the scoreboard without <table>; the parser must not depend on it."""
+    html = load_fixture("match_378829_completed.html")
+    for tag in ("table", "thead", "tbody", "tr", "th", "td"):
+        html = html.replace(f"<{tag}", "<div").replace(f"</{tag}>", "</div>")
+    assert "<table" not in html
+    parsed = parse_match(html, 378829)
+    assert (parsed.team1.tag, parsed.team2.tag) == ("FNC", "TH")
+    for got, want in zip(parsed.maps, completed.maps, strict=True):
+        assert got.players == want.players
+
+
+def test_current_scoreboard_layout_matches_legacy(completed):
+    ovw = parse_match(load_fixture("match_378829_ovw.html"), 378829)
+    for got, want in zip(ovw.maps, completed.maps, strict=True):
+        assert got.players == want.players
+
+
+def _real_row_game(html: str | None = None):
+    from bs4 import BeautifulSoup
+
+    html = html or load_fixture("real/ovw_scoreboard_row.html")
+    return BeautifulSoup(html, "lxml").select_one(".vm-stats-game")
+
+
+FNC_TEAM = Team(2593, "FNATIC", "FNC")
+BLG_TEAM = Team(12010, "Bilibili Gaming", "BLG")
+
+
+def test_real_scoreboard_row():
+    """Real vlr.gg markup: K/D/A share one cell, every cell is labelled by data-col."""
+    players = _parse_players(_real_row_game(), FNC_TEAM, BLG_TEAM)
+    assert len(players) == 1
+    p = players[0]
+    assert (p.player_id, p.handle, p.team_id, p.agent) == (458, "Chronicle", 2593, "Viper")
+    assert (p.rating, p.acs, p.kills, p.deaths, p.assists) == (1.39, 251.0, 19, 14, 8)
+    assert (p.kast, p.adr, p.hs_pct, p.first_kills, p.first_deaths) == (73.0, 174.0, 35.0, 4, 2)
+
+
+def test_misaligned_columns_raise():
+    """The Sep 2026 bug: reading the new layout by position shifted every column."""
+    html = load_fixture("real/ovw_scoreboard_row.html").replace('data-col="', 'data-x="')
+    with pytest.raises(ParseError, match="misaligned"):
+        _parse_players(_real_row_game(html), FNC_TEAM, BLG_TEAM)

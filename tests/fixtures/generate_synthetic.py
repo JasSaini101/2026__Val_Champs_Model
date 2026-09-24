@@ -22,25 +22,40 @@ def deaths(v):
     return f'<td class="mod-stat mod-vlr-deaths"><span class="stats-sq"><span class="num-sep">/</span><span class="side mod-both">{v}</span></span></td>'
 
 
+def player_stats(seed, i):
+    k = 12 + (seed + i * 3) % 11
+    d = 10 + (seed + i * 5) % 9
+    fk, fd = (seed + i) % 5, (seed + i * 2) % 4
+    return {
+        "rating2": f"{0.8 + ((seed + i * 7) % 60) / 100:.2f}",
+        "acs": 150 + (seed * 13 + i * 29) % 140,
+        "kills": k,
+        "deaths": d,
+        "assists": 3 + (seed + i) % 7,
+        "kd-diff": f"{k - d:+d}",
+        "kast": f"{65 + (seed + i * 4) % 25}%",
+        "adr": 100 + (seed * 7 + i * 17) % 90,
+        "hsp": f"{18 + (seed + i * 3) % 20}%",
+        "fb": fk,
+        "fd": fd,
+        "fk-diff": f"{fk - fd:+d}",
+    }
+
+
 def table(players, tag, seed):
+    """Legacy scoreboard: <table class="wf-table-inset mod-overview">, cells in fixed order."""
     rows = []
     for i, (pid, handle) in enumerate(players):
-        k = 12 + (seed + i * 3) % 11
-        d = 10 + (seed + i * 5) % 9
-        a = 3 + (seed + i) % 7
+        st = player_stats(seed, i)
         cells = [
-            stat(f"{0.8 + ((seed + i * 7) % 60) / 100:.2f}"),
-            stat(150 + (seed * 13 + i * 29) % 140),
-            f'<td class="mod-stat mod-vlr-kills"><span class="stats-sq"><span class="side mod-both">{k}</span></span></td>',
-            deaths(d),
-            stat(a),
-            stat(f"{k - d:+d}"),
-            stat(f"{65 + (seed + i * 4) % 25}%"),
-            stat(100 + (seed * 7 + i * 17) % 90),
-            stat(f"{18 + (seed + i * 3) % 20}%"),
-            stat((seed + i) % 5),
-            stat((seed + i * 2) % 4),
-            stat(f"{((seed + i) % 5) - ((seed + i * 2) % 4):+d}"),
+            stat(st["rating2"]),
+            stat(st["acs"]),
+            f'<td class="mod-stat mod-vlr-kills"><span class="stats-sq"><span class="side mod-both">{st["kills"]}</span></span></td>',
+            deaths(st["deaths"]),
+            *(
+                stat(st[c])
+                for c in ("assists", "kd-diff", "kast", "adr", "hsp", "fb", "fd", "fk-diff")
+            ),
         ]
         rows.append(
             f'<tr><td class="mod-player"><div><a href="/player/{pid}/{handle.lower()}">'
@@ -54,6 +69,67 @@ def table(players, tag, seed):
     return (
         f'<table class="wf-table-inset mod-overview">{head}<tbody>{"".join(rows)}</tbody></table>'
     )
+
+
+def sq(v, extra=""):
+    return (
+        f'<span class="stats-sq{extra}"><span class="side mod-both">{v}</span>'
+        f'<span class="side mod-t">{v}</span><span class="side mod-ct">{v}</span></span>'
+    )
+
+
+def ovw(players, tag, seed):
+    """Current scoreboard (seen Sep 2026): div.ovw-table rows, cells labelled by data-col,
+    and kills/deaths/assists sharing one cell."""
+    head = (
+        '<div class="ovw-row mod-head"><div class="ovw-th"></div>'
+        '<div class="ovw-th ovw-sort js-ovw-sort" data-col="rating2" title="Rating 2.0">R</div>'
+        '<div class="ovw-th ovw-sort js-ovw-sort" data-col="acs" title="Average Combat Score">ACS</div>'
+        '<div class="ovw-th mod-kda"><span class="ovw-kda-stat ovw-sort js-ovw-sort" data-col="kills">K</span>'
+        '<span class="num-space">/</span><span class="ovw-kda-stat ovw-sort js-ovw-sort" data-col="deaths">D</span>'
+        '<span class="num-space">/</span><span class="ovw-kda-stat ovw-sort js-ovw-sort" data-col="assists">A</span></div>'
+        + "".join(
+            f'<div class="ovw-th ovw-sort js-ovw-sort" data-col="{c}">{c}</div>'
+            for c in ("kd-diff", "kast", "adr", "hsp", "fb", "fd", "fk-diff")
+        )
+        + "</div>"
+    )
+    rows = []
+    for i, (pid, handle) in enumerate(players):
+        st = player_stats(seed, i)
+        kda = '<span class="num-space">/</span>'.join(
+            f'<span class="ovw-kda-stat" data-col="{c}"><span class="side mod-both">{st[c]}</span>'
+            f'<span class="side mod-t">{st[c]}</span><span class="side mod-ct">{st[c]}</span></span>'
+            for c in ("kills", "deaths", "assists")
+        )
+        rows.append(
+            '<div class="ovw-row"><div class="ovw-cell mod-player"><div class="ovw-player">'
+            f'<i class="flag mod-eu"></i><a href="/player/{pid}/{handle.lower()}">'
+            f'<div class="ovw-player-name text-of">{handle}</div>'
+            f'<div class="ovw-player-tag ge-text-light">{tag}</div></a></div>'
+            f'<div class="ovw-agents"><span class="stats-sq mod-agent small">'
+            f'<img alt="{AGENTS[i].lower()}" src="/img/vlr/game/agents/{AGENTS[i].lower()}.png" title="{AGENTS[i]}"/></span></div></div>'
+            f'<div class="ovw-cell" data-col="rating2">{sq(st["rating2"])}</div>'
+            f'<div class="ovw-cell" data-col="acs">{sq(st["acs"])}</div>'
+            f'<div class="ovw-cell mod-kda"><span class="stats-sq mod-kda">{kda}</span></div>'
+            + "".join(
+                f'<div class="ovw-cell" data-col="{c}">{sq(st[c])}</div>'
+                for c in ("kd-diff", "kast", "adr", "hsp", "fb", "fd", "fk-diff")
+            )
+            + "</div>"
+        )
+    return (
+        f'<div class="ovw-scroll-wrap"><div class="ovw-scroll js-drag-scroll">'
+        f'<div class="ovw-table">{head}{"".join(rows)}</div></div></div>'
+    )
+
+
+def scoreboard(players, tag, seed, layout):
+    if layout == "table":
+        return table(players, tag, seed)
+    if layout == "ovw":
+        return ovw(players, tag, seed)
+    return ""
 
 
 def side(name, score, win, ct, t, right=False, ot=None):
@@ -119,7 +195,7 @@ def rounds_block(t1, t2):
     )
 
 
-def game(gid, map_name, pick, t1, t2, dur, seed, with_tables=True):
+def game(gid, map_name, pick, t1, t2, dur, seed, layout="table"):
     pick_html = f' <span class="picked mod-{pick} ge-text-light">PICK</span>' if pick else ""
     (s1, ct1, tt1, ot1), (s2, ct2, tt2, ot2) = t1, t2
     header = (
@@ -130,18 +206,11 @@ def game(gid, map_name, pick, t1, t2, dur, seed, with_tables=True):
         + side("Team Heretics", s2, s2 > s1, ct2, tt2, right=True, ot=ot2)
         + "</div>"
     )
-    tables = (
-        (
-            f'<div style="overflow-x: auto;">{table(FNC, "FNC", seed)}</div>'
-            f'<div style="overflow-x: auto;">{table(TH, "TH", seed + 1)}</div>'
-        )
-        if with_tables
-        else ""
-    )
+    tables = scoreboard(FNC, "FNC", seed, layout) + scoreboard(TH, "TH", seed + 1, layout)
     return f'<div class="vm-stats-game" data-game-id="{gid}">{header}{rounds_block(t1, t2)}{tables}</div>'
 
 
-def completed_match(with_tables=True):
+def completed_match(layout="table"):
     return (
         BANNER
         + f"""<!DOCTYPE html><html><head><title>FNATIC vs. Team Heretics | VLR.gg</title></head><body>
@@ -173,12 +242,12 @@ def completed_match(with_tables=True):
   <div class="vm-stats-gamesnav"><div class="vm-stats-gamesnav-item js-map-switch" data-game-id="all">All Maps</div></div>
   <div class="vm-stats-container">
     <div class="vm-stats-game mod-active" data-game-id="all">
-      {table(FNC, "FNC", 50) if with_tables else ""}
-      {table(TH, "TH", 51) if with_tables else ""}
+      {scoreboard(FNC, "FNC", 50, layout)}
+      {scoreboard(TH, "TH", 51, layout)}
     </div>
-    {game(180001, "Lotus", 1, (13, 7, 6, None), (10, 5, 5, None), "49:31", 3, with_tables)}
-    {game(180002, "Split", 2, (7, 3, 4, None), (13, 4, 9, None), "38:02", 7, with_tables)}
-    {game(180003, "Abyss", None, (14, 6, 6, 2), (12, 6, 6, 0), "1:02:47", 11, with_tables)}
+    {game(180001, "Lotus", 1, (13, 7, 6, None), (10, 5, 5, None), "49:31", 3, layout)}
+    {game(180002, "Split", 2, (7, 3, 4, None), (13, 4, 9, None), "38:02", 7, layout)}
+    {game(180003, "Abyss", None, (14, 6, 6, 2), (12, 6, 6, 0), "1:02:47", 11, layout)}
   </div>
 </div>
 </body></html>
@@ -268,9 +337,12 @@ event_page = (
 )
 
 OUT.mkdir(parents=True, exist_ok=True)
-(OUT / "match_378829_completed.html").write_text(completed_match())
-# What vlr.gg actually served in Sep 2026: round-by-round block but no player stats tables.
-(OUT / "match_378829_no_stats.html").write_text(completed_match(with_tables=False))
+# Legacy <table> scoreboard.
+(OUT / "match_378829_completed.html").write_text(completed_match("table"))
+# Scoreboard layout vlr.gg served in Sep 2026 (div.ovw-table, data-col cells).
+(OUT / "match_378829_ovw.html").write_text(completed_match("ovw"))
+# A page with the round strip but no scoreboard at all.
+(OUT / "match_378829_no_stats.html").write_text(completed_match(None))
 (OUT / "match_378830_upcoming.html").write_text(match_upcoming)
 (OUT / "event_matches_2097.html").write_text(event_matches)
 (OUT / "event_2097.html").write_text(event_page)
