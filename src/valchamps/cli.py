@@ -19,6 +19,7 @@ DEFAULT_PARAMS = PROJECT_ROOT / "params.yaml"
 DEFAULT_FEATURES = PROJECT_ROOT / "data" / "features" / "maps.parquet"
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "map_model.pkl"
 DEFAULT_METRICS = PROJECT_ROOT / "metrics.json"
+DEFAULT_BRACKET = PROJECT_ROOT / "configs" / "bracket.yaml"
 CHAMPIONS_2026 = 2766  # vlr.gg event id of the tournament being simulated
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
@@ -322,6 +323,24 @@ def _resolve_team(engine, query: str, records) -> tuple[int, str]:
     return best.team_id, best.name
 
 
+def _map_pool(records, maps: str | None) -> tuple[str, ...]:
+    """The pool given as ``--maps``, else the seven maps of the most recent vetoed match."""
+    if maps:
+        pool = tuple(m.strip().title() for m in maps.split(",") if m.strip())
+    else:
+        pool = next((r.map_pool for r in reversed(records) if len(r.map_pool) == 7), ())
+    if len(pool) != 7:
+        raise typer.BadParameter(f"need 7 maps, got {list(pool)}")
+    return pool
+
+
+def _prediction_date(records):
+    """Now, or just after the last known match if the clock is behind the data."""
+    from datetime import UTC, datetime
+
+    return max(datetime.now(UTC).replace(tzinfo=None), records[-1].date)
+
+
 @app.command("predict-match")
 def predict_match(
     team_a: str = typer.Argument(..., help="Team name, tag or vlr.gg id."),
@@ -337,7 +356,6 @@ def predict_match(
 ) -> None:
     """Series odds for an upcoming match, from the simulated veto and the map model."""
     import pickle
-    from datetime import UTC, datetime
 
     from valchamps.features import build_feature_frame
     from valchamps.series import FORMATS, SeriesParams, map_play_probabilities, predict_series
@@ -349,20 +367,13 @@ def predict_match(
     (a, a_name), (b, b_name) = (_resolve_team(engine, t, records) for t in (team_a, team_b))
     if a == b:
         raise typer.BadParameter("pick two different teams")
-    size = len(FORMATS[best_of]) + 1
-    if maps:
-        pool = tuple(m.strip().title() for m in maps.split(",") if m.strip())
-    else:
-        pool = next((r.map_pool for r in reversed(records) if len(r.map_pool) == size), ())
-    if len(pool) != size:
-        raise typer.BadParameter(f"need {size} maps, got {list(pool)}")
+    pool = _map_pool(records, maps)
 
     _, builder = build_feature_frame(records, regions, _feature_params(params_file), events)
     bundle = pickle.loads(model_path.read_bytes())
     info = events.get(event)
-    now = datetime.now(UTC).replace(tzinfo=None)
     pred = predict_series(
-        builder, bundle["model"], a, b, max(now, records[-1].date), pool, best_of=best_of,
+        builder, bundle["model"], a, b, _prediction_date(records), pool, best_of=best_of,
         veto_prior=SeriesParams.from_yaml(params_file).veto_prior,
         event_id=event, tier=info.tier if info else None,
     )  # fmt: skip
@@ -389,6 +400,96 @@ def predict_match(
     typer.echo(f"\nlikeliest vetoes (of {len(pred.vetoes)}):")
     for o in pred.vetoes[:show_vetoes]:
         typer.echo(f"  {o.prob:.3f}  " + " -> ".join(f"{m} ({label[c]})" for m, c in o.maps))
+
+
+@app.command()
+def simulate(
+    event: int = typer.Option(CHAMPIONS_2026, help="Event to simulate."),
+    runs: int = typer.Option(100_000, help="Number of simulated tournaments."),
+    odds: str = typer.Option("model", help="Series odds: `model` (veto + map model) or `elo`."),
+    bracket_file: Path = typer.Option(DEFAULT_BRACKET, help="Tournament format (YAML)."),
+    model_path: Path = typer.Option(DEFAULT_MODEL, "--model", help="Trained map model."),
+    params_file: Path = typer.Option(DEFAULT_PARAMS, help="YAML with features/series."),
+    maps: str = typer.Option(None, help="Comma-separated map pool (default: latest vetoed)."),
+    seed: int = typer.Option(0, help="Random seed."),
+    out: Path = typer.Option(None, help="CSV of per-team odds (default: reports/bracket/)."),
+) -> None:
+    """Monte Carlo the event's bracket: each team's chance of every final standing."""
+    import json
+    import pickle
+
+    from sqlalchemy import select
+
+    from valchamps.bracket import (
+        build_bracket,
+        elo_odds,
+        fixed_results,
+        group_openings,
+        load_format,
+        model_odds,
+    )
+    from valchamps.bracket import simulate as run_simulation
+    from valchamps.features import build_feature_frame
+    from valchamps.series import SeriesParams
+
+    if odds not in ("model", "elo"):
+        raise typer.BadParameter("--odds must be `model` or `elo`")
+    engine = db.get_engine(Settings().db_url)
+    records, regions, events = _load_history(engine)
+    try:
+        openings = group_openings(engine, event)
+        bracket = build_bracket(load_format(bracket_file), openings)
+    except ValueError as exc:
+        typer.echo(f"cannot build the bracket for event {event}: {exc}")
+        raise typer.Exit(code=1) from exc
+    teams = sorted({t for pairs in openings.values() for pair in pairs for t in pair})
+    group_of = {t: g for g, pairs in openings.items() for pair in pairs for t in pair}
+    formats = sorted({m.best_of for m in bracket})
+
+    _, builder = build_feature_frame(records, regions, _feature_params(params_file), events)
+    if odds == "model":
+        bundle = pickle.loads(model_path.read_bytes())
+        info = events.get(event)
+        matrices = model_odds(
+            builder, bundle["model"], teams, _prediction_date(records), _map_pool(records, maps),
+            formats=formats, veto_prior=SeriesParams.from_yaml(params_file).veto_prior,
+            event_id=event, tier=info.tier if info else None,
+        )  # fmt: skip
+        source = f"map model {bundle['name']} (trained through {bundle['trained_through']})"
+    else:
+        matrices = elo_odds(builder, teams, formats)
+        source = "raw Elo"
+
+    results = fixed_results(records, event)
+    sim = run_simulation(bracket, matrices, teams, runs, results, seed=seed)
+    with engine.connect() as conn:
+        names = dict(conn.execute(select(db.teams.c.team_id, db.teams.c.name)).all())
+    table = sim.to_frame(names)
+    table.insert(2, "group", table["team_id"].map(group_of))
+
+    typer.echo(
+        f"event {event}: {len(teams)} teams, {runs:,} runs, odds from {source}; "
+        f"{len(sim.used_results)} finished series fixed"
+    )
+    for r in sim.unused_results:
+        typer.echo(
+            f"warning: result not in the bracket ({r.stage}: {names.get(r.team_a)} vs "
+            f"{names.get(r.team_b)}); check {bracket_file.name}"
+        )
+    typer.echo(f"{'team':<22}{'grp':>4}{'playoffs':>10}{'top4':>8}{'final':>8}{'title':>8}")
+    for row in table.itertuples(index=False):
+        typer.echo(f"{row.team[:21]:<22}{row.group:>4}{row.top8:>10.3f}{row.top4:>8.3f}"
+                   f"{row.final:>8.3f}{row.title:>8.3f}")  # fmt: skip
+
+    out = out or REPORTS_DIR / "bracket" / f"odds_{event}_{odds}.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out, index=False)
+    meta = {"event": event, "runs": runs, "odds": source, "seed": seed,
+            "fixed_results": len(sim.used_results), "as_of": str(records[-1].date)}  # fmt: skip
+    out.with_suffix(".json").write_text(
+        json.dumps({**meta, "teams": table.to_dict(orient="records")}, indent=2)
+    )
+    typer.echo(f"wrote {out} and {out.with_suffix('.json').name}")
 
 
 def _display_uri(uri: str) -> str:

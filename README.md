@@ -21,7 +21,7 @@ GitHub Actions cron: scrape new results → update → re-simulate → publish o
 | 3 | Point-in-time features (Elo, form, map pool, rosters) | ✅ |
 | 4 | Map model: Elo → linear → LightGBM → PyTorch, walk-forward backtests, MLflow on DagsHub | ✅ |
 | 5 | Series model: veto simulation, exact Bo3/Bo5 odds, series backtest | ✅ |
-| 6 | Monte Carlo bracket simulator | ⏳ |
+| 6 | Monte Carlo bracket simulator | ✅ |
 | 7 | Scheduled live-update pipeline | ⏳ |
 | 8 | FastAPI + Streamlit dashboard | ⏳ |
 
@@ -39,6 +39,7 @@ uv sync --extra nn            # PyTorch, for the nn map model
 uv run valchamps train --model nn    # holdout check, then fit on everything -> models/map_model.pkl
 uv run valchamps series-backtest     # walk-forward Bo3/Bo5 odds: simulated veto vs actual maps vs Elo
 uv run valchamps predict-match "G2 Esports" "Paper Rex" --best-of 3
+uv run valchamps simulate            # Champions 2026 title odds (--odds elo for raw Elo)
 ```
 
 Or with Docker:
@@ -155,6 +156,18 @@ It also reports how much probability the simulated veto gave to the real map seq
 
 `valchamps predict-match TEAM_A TEAM_B --best-of 3` prints series odds, the final-score distribution, a per-map table and the likeliest vetoes for an upcoming match. Teams can be given by name, tag or vlr.gg id. By default it uses the saved map model and the pool from the most recent vetoed match; `--maps` sets a different pool.
 
+## Bracket simulator
+
+`valchamps simulate` runs Champions 2026 (event 2766) 100,000 times and reports each team's chance of every final standing, summarised as playoffs, top 4, final and title.
+
+**Format**: the format is data in `configs/bracket.yaml`: four GSL groups (Opening, Winner's, Elimination, Decider; the top two advance), then an 8-team double-elimination playoff with a Bo5 lower final and grand final. Each group's teams come from the event's Opening matches in the database. The playoff seeding copies Champions 2025's, because 2026's pairings weren't published yet. Replaying 2025 with `--event 2283` matches all 34 of its real results and reproduces its final standings.
+
+**Odds**: series odds are computed once for every pair of teams at Bo3 and Bo5. `--odds model` (the default) uses the simulated veto and the map model, the same as `predict-match`. `--odds elo` uses raw Elo.
+
+**Simulation**: all runs are simulated at once with numpy. A finished match is fixed to its real result in every run where the same two teams meet at that stage. A finished result that fits nowhere in the bracket (for example, when the configured seeding is wrong) is printed as a warning.
+
+**Output**: the per-team table goes to `reports/bracket/odds_<event>_<odds>.csv`, with a JSON copy next to it.
+
 ## Testing
 
 The parser tests run against HTML fixtures in `tests/fixtures/vlr/`. The fixtures copy vlr.gg's markup, but their numbers and ids are **synthetic** (see the banner at the top of each file). HTTP is mocked with `respx`, so the suite never touches the network. Before relying on a full scrape, save a few real pages as extra fixtures and check that the selectors still match the live site.
@@ -171,7 +184,9 @@ src/valchamps/
   features/         Elo, form, map pool, roster trackers; training-table builder
   models/           baselines, linear, LightGBM, PyTorch; walk-forward backtests; MLflow
   series/           veto simulation, exact Bo3/Bo5 odds, series backtest, match predictions
+  bracket/          tournament format, pairwise odds, Monte Carlo bracket simulation
 configs/events.yaml events to scrape
+configs/bracket.yaml Champions format and playoff seeding
 tests/              pytest suite + HTML fixtures
 dvc.yaml            pipeline (ingest -> features -> train)
 params.yaml         feature, model and series hyper-parameters
