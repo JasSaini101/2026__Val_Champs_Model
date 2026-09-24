@@ -1,20 +1,37 @@
-# Tier-1 VCT events to scrape. IDs are the number in the vlr.gg event URL:
+# Events to scrape. IDs are the number in the vlr.gg event URL:
 #   https://www.vlr.gg/event/<event_id>/<slug>
 #
-# NOTE: these IDs were written without access to vlr.gg (the build environment blocks it).
-# Check each one on vlr.gg before the first full scrape. `valchamps ingest --event <id>` prints
-# the event name it finds, which is a quick way to confirm.
+# Scope: the 2025 and 2026 VCT regional leagues (Kickoff, Stage 1, Stage 2 in each of the four
+# partnership regions). IDs confirmed on vlr.gg in Sep 2026.
 #
-# Still to add once confirmed: 2024-2026 regional leagues (Americas / EMEA / Pacific / China,
-# Kickoff + Stage 1 + Stage 2) and Champions 2026 itself. Regional leagues are most of the data,
-# so they matter more for the model than the international events.
+# International events (Masters, Champions) are not included. They are the only matches between
+# teams from different regions; see README "Data scope" for why that matters.
+#
+# All partnership league matches are played on LAN in each region's studio.
 events:
-  - {event_id: 1188, name: "VCT 2023: LOCK//IN São Paulo", tier: international, is_lan: true}
-  - {event_id: 1494, name: "VCT 2023: Masters Tokyo", tier: international, is_lan: true}
-  - {event_id: 1657, name: "VALORANT Champions 2023", tier: champions, is_lan: true}
-  - {event_id: 1921, name: "VCT 2024: Masters Madrid", tier: international, is_lan: true}
-  - {event_id: 1999, name: "VCT 2024: Masters Shanghai", tier: international, is_lan: true}
-  - {event_id: 2097, name: "VALORANT Champions 2024", tier: champions, is_lan: true}
-  - {event_id: 2281, name: "VCT 2025: Masters Bangkok", tier: international, is_lan: true}
-  - {event_id: 2282, name: "VCT 2025: Masters Toronto", tier: international, is_lan: true}
-  - {event_id: 2283, name: "VALORANT Champions 2025", tier: champions, is_lan: true}
+  # 2025 ----------------------------------------------------------------------------------------
+  - {event_id: 2274, name: "VCT 2025: Americas Kickoff", tier: regional, region: americas, is_lan: true}
+  - {event_id: 2347, name: "VCT 2025: Americas Stage 1", tier: regional, region: americas, is_lan: true}
+  - {event_id: 2501, name: "VCT 2025: Americas Stage 2", tier: regional, region: americas, is_lan: true}
+  - {event_id: 2276, name: "VCT 2025: EMEA Kickoff", tier: regional, region: emea, is_lan: true}
+  - {event_id: 2380, name: "VCT 2025: EMEA Stage 1", tier: regional, region: emea, is_lan: true}
+  - {event_id: 2498, name: "VCT 2025: EMEA Stage 2", tier: regional, region: emea, is_lan: true}
+  - {event_id: 2277, name: "VCT 2025: Pacific Kickoff", tier: regional, region: pacific, is_lan: true}
+  - {event_id: 2379, name: "VCT 2025: Pacific Stage 1", tier: regional, region: pacific, is_lan: true}
+  - {event_id: 2500, name: "VCT 2025: Pacific Stage 2", tier: regional, region: pacific, is_lan: true}
+  - {event_id: 2275, name: "VCT 2025: China Kickoff", tier: regional, region: china, is_lan: true}
+  - {event_id: 2359, name: "VCT 2025: China Stage 1", tier: regional, region: china, is_lan: true}
+  - {event_id: 2499, name: "VCT 2025: China Stage 2", tier: regional, region: china, is_lan: true}
+  # 2026 ----------------------------------------------------------------------------------------
+  - {event_id: 2682, name: "VCT 2026: Americas Kickoff", tier: regional, region: americas, is_lan: true}
+  - {event_id: 2860, name: "VCT 2026: Americas Stage 1", tier: regional, region: americas, is_lan: true}
+  - {event_id: 2977, name: "VCT 2026: Americas Stage 2", tier: regional, region: americas, is_lan: true}
+  - {event_id: 2684, name: "VCT 2026: EMEA Kickoff", tier: regional, region: emea, is_lan: true}
+  - {event_id: 2863, name: "VCT 2026: EMEA Stage 1", tier: regional, region: emea, is_lan: true}
+  - {event_id: 2976, name: "VCT 2026: EMEA Stage 2", tier: regional, region: emea, is_lan: true}
+  - {event_id: 2683, name: "VCT 2026: Pacific Kickoff", tier: regional, region: pacific, is_lan: true}
+  - {event_id: 2775, name: "VCT 2026: Pacific Stage 1", tier: regional, region: pacific, is_lan: true}
+  - {event_id: 2776, name: "VCT 2026: Pacific Stage 2", tier: regional, region: pacific, is_lan: true}
+  - {event_id: 2685, name: "VCT 2026: China Kickoff", tier: regional, region: china, is_lan: true}
+  - {event_id: 2864, name: "VCT 2026: China Stage 1", tier: regional, region: china, is_lan: true}
+  - {event_id: 2978, name: "VCT 2026: China Stage 2", tier: regional, region: china, is_lan: true}
