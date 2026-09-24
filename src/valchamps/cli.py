@@ -444,7 +444,7 @@ def update(
     Exits 1 if some matches failed to scrape (after publishing what it has), so a scheduled
     run shows up as failed.
     """
-    from valchamps.bracket.publish import publish
+    from valchamps.bracket.publish import publish, write_matchups
 
     failed = 0
     if ingest_first:
@@ -461,18 +461,23 @@ def update(
             f"{report.pending} pending (teams TBD), {failed} failed"
         )
 
-    forecast = _forecast(event, runs, odds, bracket_file, model_path, params_file, None, seed)
+    forecast = _forecast(event, runs, odds, bracket_file, model_path, params_file, None, seed,
+                         matchups=True)  # fmt: skip
     _print_forecast(forecast, bracket_file)
     out_dir = out_dir or ODDS_DIR / str(event)
     if publish(forecast, out_dir, force=force):
+        write_matchups(forecast, out_dir)
         typer.echo(f"published to {out_dir} ({len(forecast.sim.used_results)} results fixed)")
     else:
-        typer.echo(f"no new results since the last update; {out_dir} left as is")
+        if not (out_dir / "matchups.json").exists() and write_matchups(forecast, out_dir):
+            typer.echo(f"wrote the missing {out_dir / 'matchups.json'}")
+        typer.echo(f"no new results since the last update; odds in {out_dir} left as is")
     if failed:
         raise typer.Exit(code=1)
 
 
-def _forecast(event, runs, odds, bracket_file, model_path, params_file, maps, seed):
+def _forecast(event, runs, odds, bracket_file, model_path, params_file, maps, seed,
+              matchups=False):  # fmt: skip
     from valchamps.bracket.run import forecast_event
     from valchamps.series import SeriesParams
 
@@ -482,7 +487,7 @@ def _forecast(event, runs, odds, bracket_file, model_path, params_file, maps, se
             db.get_engine(Settings().db_url), event, bracket_file=bracket_file, odds=odds,
             model_path=model_path, feature_params=_feature_params(params_file),
             veto_prior=SeriesParams.from_yaml(params_file).veto_prior, map_pool=pool,
-            runs=runs, seed=seed,
+            runs=runs, seed=seed, matchups=matchups,
         )  # fmt: skip
     except ValueError as exc:
         typer.echo(f"cannot simulate event {event}: {exc}")

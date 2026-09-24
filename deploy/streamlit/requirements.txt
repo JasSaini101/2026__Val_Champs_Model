@@ -1,0 +1,5 @@
+# The hosted dashboard only reads published JSON/CSV, so it skips the modelling stack.
+altair==6.3.0
+httpx==0.28.1
+pandas==3.0.6
+streamlit==1.64.0
