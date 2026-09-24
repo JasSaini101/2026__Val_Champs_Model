@@ -1,0 +1,35 @@
+# VALORANT Champions format, read by `valchamps simulate`.
+#
+# Group stage: four GSL groups of four (Opening x2, Winner's, Elimination, Decider). The Winner's
+# match winner finishes 1st (seed A1), the Decider winner 2nd (A2). Each group's teams and
+# opening pairs come from the event's Opening matches in the database.
+#
+# Playoffs: 8-team double elimination. Slots are a group seed (A1), or the winner (W:) or loser
+# (L:) of an earlier match. The seeding below is Champions 2025's, checked by replaying that
+# event (`valchamps simulate --event 2283`); Champions 2026 has the same 34-match structure but
+# its playoff pairings were not published when this was written. Fix them here if they differ.
+#
+# `stage` must match vlr.gg's stage label: finished matches are fixed to their real result by
+# (stage, teams). `loser_place` / `winner_place` are the final standings a team gets there.
+groups:
+  names: [A, B, C, D]
+  best_of: 3
+  elimination_place: "13-16"
+  decider_place: "9-12"
+
+playoffs:
+  - {id: UQF1, stage: "Playoffs: Upper Quarterfinals", a: A1, b: D2}
+  - {id: UQF2, stage: "Playoffs: Upper Quarterfinals", a: B1, b: C2}
+  - {id: UQF3, stage: "Playoffs: Upper Quarterfinals", a: D1, b: B2}
+  - {id: UQF4, stage: "Playoffs: Upper Quarterfinals", a: C1, b: A2}
+  - {id: LR1a, stage: "Playoffs: Lower Round 1", a: "L:UQF1", b: "L:UQF2", loser_place: "7-8"}
+  - {id: LR1b, stage: "Playoffs: Lower Round 1", a: "L:UQF3", b: "L:UQF4", loser_place: "7-8"}
+  - {id: USF1, stage: "Playoffs: Upper Semifinals", a: "W:UQF1", b: "W:UQF2"}
+  - {id: USF2, stage: "Playoffs: Upper Semifinals", a: "W:UQF3", b: "W:UQF4"}
+  - {id: LR2a, stage: "Playoffs: Lower Round 2", a: "L:USF1", b: "W:LR1b", loser_place: "5-6"}
+  - {id: LR2b, stage: "Playoffs: Lower Round 2", a: "L:USF2", b: "W:LR1a", loser_place: "5-6"}
+  - {id: UF, stage: "Playoffs: Upper Final", a: "W:USF1", b: "W:USF2"}
+  - {id: LR3, stage: "Playoffs: Lower Round 3", a: "W:LR2a", b: "W:LR2b", loser_place: "4"}
+  - {id: LF, stage: "Playoffs: Lower Final", a: "L:UF", b: "W:LR3", best_of: 5, loser_place: "3"}
+  - {id: GF, stage: "Playoffs: Grand Final", a: "W:UF", b: "W:LF", best_of: 5,
+     loser_place: "2", winner_place: "1"}
