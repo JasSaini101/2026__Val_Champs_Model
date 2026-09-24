@@ -3,13 +3,12 @@ from __future__ import annotations
 import itertools
 import math
 import pickle
-from datetime import datetime
 
 import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from tests.synthetic_history import MAP_POOL, make_history
+from tests.synthetic_history import MAP_POOL, add_champions_event, make_history
 from valchamps.bracket import (
     FixedResult,
     MatchSlot,
@@ -24,7 +23,6 @@ from valchamps.bracket import (
 )
 from valchamps.cli import DEFAULT_BRACKET, app
 from valchamps.data import db
-from valchamps.data.models import Event, MapResult, Match, Team, VetoStep
 from valchamps.features import build_feature_frame, load_events, load_records, team_regions
 from valchamps.models import load_config, make_model, prepare
 
@@ -147,30 +145,7 @@ def champions(tmp_path_factory):
     engine = db.get_engine(f"sqlite:///{path}")
     db.init_db(engine)
     truth = make_history(engine, teams_per_region=8, spread=200)
-    teams = sorted(truth.strength)
-    groups = {g: teams[i::4] for i, g in enumerate("ABCD")}  # mixes the two regions
-    day = datetime(2027, 3, 1, 12)
-    with engine.begin() as conn:
-        db.upsert_event(conn, Event(99, "Champions"), tier="champions", region="international")
-        match_id = 90_000
-        for g, (a, b, c, d) in groups.items():
-            for t1, t2 in ((a, b), (c, d)):
-                match_id += 1
-                played = match_id == 90_001
-                veto = [VetoStep(i + 1, act, MAP_POOL[i], None if act == "remains" else
-                                 (t1 if i % 2 == 0 else t2))
-                        for i, act in enumerate(["ban", "ban", "pick", "pick", "ban", "ban",
-                                                 "remains"])]  # fmt: skip
-                maps = [MapResult(900_000 + k, k + 1, MAP_POOL[2 + k], 13, 7, t1) for k in (0, 1)]
-                db.save_match(conn, Match(
-                    match_id=match_id, event_id=99, event_name="Champions",
-                    stage=f"Group Stage: Opening ({g})", date_utc=day,
-                    status="completed" if played else "upcoming", best_of=3,
-                    team1=Team(t1, f"t{t1}"), team2=Team(t2, f"t{t2}"),
-                    team1_score=2 if played else None, team2_score=0 if played else None,
-                    veto=veto if played else [], maps=maps if played else [],
-                ))  # fmt: skip
-    return engine, groups
+    return engine, add_champions_event(engine, sorted(truth.strength))
 
 
 def test_event_openings_and_results(champions):
@@ -238,4 +213,4 @@ def test_cli_simulate_without_groups(champions, monkeypatch):
     monkeypatch.setenv("VALCHAMPS_DB_URL", str(engine.url))
     result = CliRunner().invoke(app, ["simulate", "--event", "1", "--odds", "elo"])
     assert result.exit_code == 1
-    assert "cannot build the bracket" in result.output
+    assert "no group-stage opening matches" in result.output
