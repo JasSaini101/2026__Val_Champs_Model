@@ -273,7 +273,8 @@ def test_cli_train_saves_and_registers_model(cli_env, frame, name):
 
     mlflow.set_tracking_uri(f"sqlite:///{tmp / 'mlflow.db'}")
     loaded = mlflow.pyfunc.load_model("models:/map-model/1")
-    np.testing.assert_allclose(loaded.predict(frame.head(10)), p[:10])
+    # The nn computes in float32, whose last bit can depend on the batch size (10 rows vs all).
+    np.testing.assert_allclose(loaded.predict(frame.head(10)), p[:10], rtol=1e-5)
 
 
 def test_cli_rejects_unknown_model(cli_env):
