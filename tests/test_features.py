@@ -12,6 +12,7 @@ from tests.synthetic_history import make_history
 from valchamps.cli import DEFAULT_PARAMS, app
 from valchamps.features import (
     FEATURE_COLUMNS,
+    EventInfo,
     FeatureParams,
     MapRecord,
     MatchRecord,
@@ -28,10 +29,10 @@ _game_ids = iter(range(1, 10_000))
 
 def rec(
     match_id: int, day: int, a: int, b: int, maps: list[tuple[str, int, int, int | None]],
-    tier: str = "regional", lineups: dict | None = None, vetoes: tuple = (),
+    tier: str = "regional", lineups: dict | None = None, vetoes: tuple = (), event_id: int = 1,
 ) -> MatchRecord:  # fmt: skip
     return MatchRecord(
-        match_id=match_id, date=START + timedelta(days=day), event_id=1, tier=tier,
+        match_id=match_id, date=START + timedelta(days=day), event_id=event_id, tier=tier,
         team1_id=a, team2_id=b, best_of=3,
         maps=tuple(MapRecord(next(_game_ids), i + 1, name, r1, r2, pick)
                    for i, (name, r1, r2, pick) in enumerate(maps)),
@@ -249,3 +250,108 @@ def test_cli_build_features(history, tmp_path, monkeypatch):
     assert len(frame) == 2 * frame.game_id.nunique()
     assert frame.elo_prob.between(0, 1).all()
     assert "cross-region maps" in result.output
+
+
+def test_league_and_international_placements_are_point_in_time():
+    end = lambda day: (START + timedelta(days=day)).date()  # noqa: E731
+    events = {
+        # League: team 1 won it, team 2 placed 4th, team 3 played but is not listed.
+        10: EventInfo(10, "regional", end(10), {1: (1, 11), 2: (4, 6)}),
+        20: EventInfo(20, "international", end(30), {2: (1, None)}),
+    }
+    league = [("Bind", 13, 5, None)]
+    records = [
+        rec(1, 0, 1, 2, league, event_id=10),
+        rec(2, 5, 1, 3, league, event_id=10),
+        rec(3, 10, 2, 3, league, event_id=10),  # final day of the league
+        rec(4, 25, 1, 2, league, tier="international", event_id=20),
+        rec(5, 40, 1, 2, league, tier="international", event_id=99),
+    ]
+    frame, _ = build_feature_frame(records, {}, events=events)
+    rows = frame[frame.perspective == 0].set_index("match_id")
+
+    # During the league (up to and including its last day) nothing is known yet.
+    assert rows.loc[[1, 2, 3], "league_place_a"].isna().all()
+    # After it: team 1 won (1st, 11 points), team 2 finished 4th.
+    m4 = rows.loc[4]
+    assert (m4.league_place_a, m4.league_won_a, m4.season_points_a) == (1.0, 1.0, 11.0)
+    assert (m4.league_place_b, m4.league_won_b, m4.league_place_diff) == (4.0, 0.0, -3.0)
+    assert math.isnan(m4.intl_place_a)  # the international has not finished
+    # Once the international is over, team 2's win there is visible.
+    m5 = rows.loc[5]
+    # Team 1 played the international but is not listed: just below the last listed place.
+    assert (m5.intl_place_b, m5.intl_place_a) == (1.0, 2.0)
+
+
+def test_unlisted_participant_finishes_below_last_listed_place():
+    events = {10: EventInfo(10, "regional", START.date(), {1: (1, 11), 2: (4, 6)})}
+    records = [
+        rec(1, -3, 3, 1, [("Bind", 13, 5, None)], event_id=10),
+        rec(2, 5, 3, 1, [("Bind", 13, 5, None)], event_id=11),
+    ]
+    frame, _ = build_feature_frame(records, {}, events=events)
+    row = frame[(frame.perspective == 0) & (frame.match_id == 2)].iloc[0]
+    assert (row.league_place_a, row.season_points_a) == (5.0, 0.0)
+
+
+def test_showmatches_are_excluded(tmp_path):
+    from valchamps.data import db
+    from valchamps.data.models import MapResult, Match, Team
+
+    engine = db.get_engine(f"sqlite:///{tmp_path / 'show.db'}")
+    db.init_db(engine)
+    make_history(engine, teams_per_region=3, seasons=(2025,))
+    real = load_records(engine)
+    with engine.begin() as conn:
+        base = real[0]
+        db.save_match(conn, Match(
+            match_id=999_999, event_id=base.event_id, event_name=None, stage="Showmatch: Override",
+            date_utc=base.date, status="completed", best_of=1,
+            team1=Team(base.team1_id, "a"), team2=Team(base.team2_id, "b"),
+            team1_score=1, team2_score=0, maps=[MapResult(999_999, 1, "Bind", 13, 9, None)],
+        ))  # fmt: skip
+    assert 999_999 not in {r.match_id for r in load_records(engine)}
+
+
+def test_missing_event_end_date_falls_back_to_last_match(history):
+    from sqlalchemy import update
+
+    from valchamps.data import db
+    from valchamps.features import load_events
+
+    engine, _, records, _ = history
+    event_id = records[0].event_id
+    last = max(r.date for r in records if r.event_id == event_id).date()
+    # Synthetic events have no dates, and every match is finished: last match date is used.
+    assert load_events(engine)[event_id].end_date == last
+
+    # With a match still to play, the event is unfinished and gets no end date.
+    with engine.begin() as conn:
+        conn.execute(update(db.matches).where(db.matches.c.match_id == records[0].match_id)
+                     .values(status="upcoming"))  # fmt: skip
+    try:
+        assert load_events(engine)[event_id].end_date is None
+    finally:
+        with engine.begin() as conn:
+            conn.execute(update(db.matches).where(db.matches.c.match_id == records[0].match_id)
+                         .values(status="completed"))  # fmt: skip
+
+
+def test_season_points_include_masters_and_reset_each_year():
+    end = lambda day: (START + timedelta(days=day)).date()  # noqa: E731
+    events = {
+        10: EventInfo(10, "regional", end(10), {1: (1, 3)}),  # league win, 3 points
+        20: EventInfo(20, "international", end(20), {1: (1, 7)}),  # Masters win, 7 points
+    }
+    league = [("Bind", 13, 5, None)]
+    records = [
+        rec(1, 0, 1, 2, league, event_id=10),
+        rec(2, 15, 1, 2, league, tier="international", event_id=20),
+        rec(3, 30, 1, 2, league, event_id=30),
+        rec(4, 400, 1, 2, league, event_id=40),  # next calendar year
+    ]
+    frame, _ = build_feature_frame(records, {}, events=events)
+    rows = frame[frame.perspective == 0].set_index("match_id")
+    assert rows.loc[2, "season_points_a"] == 3.0
+    assert rows.loc[3, "season_points_a"] == 10.0
+    assert rows.loc[4, "season_points_a"] == 0.0

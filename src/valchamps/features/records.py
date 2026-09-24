@@ -9,14 +9,27 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, case, func, select
 
 from valchamps.data import db
 
 INTERNATIONAL_TIERS = frozenset({"international", "champions"})
+
+
+@dataclass(frozen=True)
+class EventInfo:
+    event_id: int
+    tier: str | None
+    end_date: date | None
+    # team_id -> (place, circuit points); only placed teams, usually the top 8.
+    standings: dict[int, tuple[int, int | None]] = field(default_factory=dict)
+
+    @property
+    def is_international(self) -> bool:
+        return self.tier in INTERNATIONAL_TIERS
 
 
 @dataclass(frozen=True)
@@ -89,6 +102,8 @@ def load_records(engine: Engine) -> list[MatchRecord]:
             conn,
         )  # fmt: skip
 
+    # Exhibition matches (e.g. "Showmatch: Override") are not competitive results.
+    matches = matches[~matches.stage.fillna("").str.lower().str.startswith("showmatch")]
     maps = maps[maps.team1_rounds != maps.team2_rounds]
     maps_by_match = {mid: g.sort_values("map_order") for mid, g in maps.groupby("match_id")}
     vetoes_by_match = {mid: g for mid, g in vetoes.groupby("match_id")}
@@ -139,6 +154,40 @@ def load_records(engine: Engine) -> list[MatchRecord]:
         )
     records.sort(key=lambda r: (r.date, r.match_id))
     return records
+
+
+def load_events(engine: Engine) -> dict[int, EventInfo]:
+    """Tier, end date and final placements of every event.
+
+    If the event page gave no end date but every match of the event is finished, the date of
+    its last match stands in (still schedule information, never a result).
+    """
+    with engine.connect() as conn:
+        events = conn.execute(select(db.events.c.event_id, db.events.c.tier, db.events.c.end_date))
+        placed = conn.execute(select(db.placements)).all()
+        last_match = {
+            r.event_id: (r.last, r.unfinished)
+            for r in conn.execute(
+                select(
+                    db.matches.c.event_id,
+                    func.max(db.matches.c.date_utc).label("last"),
+                    func.sum(case((db.matches.c.status != "completed", 1), else_=0)).label(
+                        "unfinished"
+                    ),
+                ).group_by(db.matches.c.event_id)
+            )
+        }
+    standings: dict[int, dict[int, tuple[int, int | None]]] = defaultdict(dict)
+    for p in placed:
+        standings[p.event_id][p.team_id] = (p.place, p.circuit_points)
+    infos = {}
+    for e in events:
+        end = e.end_date
+        last, unfinished = last_match.get(e.event_id, (None, 1))
+        if end is None and last is not None and not unfinished:
+            end = pd.Timestamp(last).date()
+        infos[e.event_id] = EventInfo(e.event_id, e.tier, end, standings.get(e.event_id, {}))
+    return infos
 
 
 def team_regions(engine: Engine) -> dict[int, str]:

@@ -7,16 +7,25 @@ from valchamps.features.build import (
     build_feature_frame,
 )
 from valchamps.features.params import FeatureParams
-from valchamps.features.records import MapRecord, MatchRecord, load_records, team_regions
+from valchamps.features.records import (
+    EventInfo,
+    MapRecord,
+    MatchRecord,
+    load_events,
+    load_records,
+    team_regions,
+)
 
 __all__ = [
     "FEATURE_COLUMNS",
     "META_COLUMNS",
+    "EventInfo",
     "FeatureBuilder",
     "FeatureParams",
     "MapRecord",
     "MatchRecord",
     "build_feature_frame",
+    "load_events",
     "load_records",
     "team_regions",
 ]

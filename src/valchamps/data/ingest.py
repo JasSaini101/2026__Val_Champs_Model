@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
 from sqlalchemy import Engine
 
 from valchamps.data import db
-from valchamps.data.parser import ParseError, parse_event, parse_event_matches, parse_match
+from valchamps.data.parser import (
+    ParseError,
+    parse_event,
+    parse_event_matches,
+    parse_match,
+    parse_standings,
+)
 from valchamps.data.scraper import ScrapeError, VlrClient
 
 log = logging.getLogger(__name__)
@@ -51,6 +57,8 @@ def ingest_event(
 
     event_html = client.get(f"/event/{spec.event_id}", max_age=LISTING_MAX_AGE)
     event = parse_event(event_html, spec.event_id)
+    if event.name == f"event-{spec.event_id}":  # title not found on the page
+        event = replace(event, name=spec.name)
     listing_path = f"/event/matches/{spec.event_id}/?series_id=all"
     listings = parse_event_matches(client.get(listing_path, max_age=LISTING_MAX_AGE))
     report.listed = len(listings)
@@ -77,6 +85,10 @@ def ingest_event(
             db.save_match(conn, match, event_id=spec.event_id)
             db.log_scrape(conn, listing.url_path, ok=True)
         report.fetched += 1
+
+    # After the matches, so every placed team already exists.
+    with engine.begin() as conn:
+        db.save_standings(conn, spec.event_id, parse_standings(event_html))
 
     log.info(
         "event %s: %d listed, %d fetched, %d skipped, %d failed",

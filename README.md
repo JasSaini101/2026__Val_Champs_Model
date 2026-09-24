@@ -57,7 +57,7 @@ Training data covers 2025 and 2026 (`configs/events.yaml`, 30 events):
 
 **Parser** (`src/valchamps/data/parser.py`): BeautifulSoup/lxml extraction of:
 
-- event metadata and the event's match list (completed, live and upcoming)
+- event metadata (name, dates, location), final standings (place, circuit points, qualification note) and the event's match list (completed, live and upcoming)
 - match header: teams, series score, best-of, UTC start time, stage
 - map vetoes (`FNC ban Icebox; TH pick Lotus; …; Abyss remains`), with team tags mapped to team ids
 - each map: name, who picked it, final rounds, attack/defence halves, duration
@@ -72,6 +72,7 @@ events ─┐
                ├─< maps ─< player_map_stats >── players
                │     └─< rounds
                └─< vetoes
+placements (event × team final standings)
 scrape_log (audit of every fetch)
 ```
 
@@ -100,6 +101,7 @@ Set with environment variables:
 | Form (`form.py`) | map win rate and round difference over the last 5 matches, days of rest, matches in the last 30 days, experience, **international map win rate**, head-to-head record |
 | Map pool (`map_pool.py`) | win rate on this map, shrunk toward the team's overall rate; pick and ban rate for this map; whether the map was the team's pick, the opponent's pick, or the decider |
 | Roster (`roster.py`) | share of the lineup unchanged from the previous match; the lineup's average player rating over recent matches |
+| Placement (`placement.py`) | finish in the team's most recent **completed** league event (and whether it won it), circuit points so far this season, finish at its most recent international event. Standings become visible only after the event's end date |
 
 Hyper-parameters are in `params.yaml` and tracked by DVC. The same `FeatureBuilder` state will score upcoming Champions matches.
 

@@ -72,3 +72,20 @@ def test_match_does_not_clobber_existing_event_name(engine, completed):
     with engine.connect() as conn:
         row = conn.execute(select(db.events)).one()
         assert (row.name, row.tier) == ("Champions 2024 (curated)", "champions")
+
+
+def test_save_standings_replaces_event_placements(engine):
+    from valchamps.data.models import Event, Standing
+
+    with engine.begin() as conn:
+        db.upsert_event(conn, Event(2501, "Americas Stage 2"))
+        db.save_standings(conn, 2501, [Standing(11058, "G2 Esports", 1, 1, 11, "Champions"),
+                                       Standing(1034, "NRG", 2, 2, 9, None)])  # fmt: skip
+        db.save_standings(conn, 2501, [Standing(11058, "G2 Esports", 1, 1, 11, "Champions")])
+    with engine.connect() as conn:
+        rows = conn.execute(select(db.placements)).all()
+        assert [(r.team_id, r.place, r.circuit_points, r.note) for r in rows] == [
+            (11058, 1, 11, "Champions")
+        ]
+        # Teams only known from standings are created, without clobbering anything.
+        assert count(conn, db.teams) == 2
