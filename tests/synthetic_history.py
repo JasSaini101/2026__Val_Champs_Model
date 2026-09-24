@@ -39,7 +39,9 @@ def make_history(
     seed: int = 7,
     teams_per_region: int = 6,
     seasons: tuple[int, ...] = (2025, 2026),
+    spread: float = 120.0,
 ) -> Truth:
+    """``spread`` is the standard deviation of true team strength (Elo points) within a region."""
     rng = random.Random(seed)
     strength: dict[int, float] = {}
     region_of: dict[int, str] = {}
@@ -51,7 +53,7 @@ def make_history(
         for i in range(teams_per_region):
             tid = 100 * (r_idx + 1) + i
             teams[region].append(Team(tid, f"{region}-{i}", f"{region[:2].upper()}{i}"))
-            strength[tid] = offset + rng.gauss(0, 120)
+            strength[tid] = offset + rng.gauss(0, spread)
             region_of[tid] = region
             roster[tid] = [next(next_player) for _ in range(5)]
 
