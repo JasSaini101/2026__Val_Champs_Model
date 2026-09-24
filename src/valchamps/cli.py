@@ -506,6 +506,58 @@ def _print_forecast(forecast, bracket_file: Path) -> None:
                    f"{row.final:>8.3f}{row.title:>8.3f}")  # fmt: skip
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Interface to bind (0.0.0.0 in a container)."),
+    port: int = typer.Option(8000, help="Port."),
+    reload: bool = typer.Option(False, help="Restart on code changes (development)."),
+) -> None:
+    """Run the HTTP API (published odds and match predictions). Needs the `serve` extra."""
+    try:
+        import uvicorn
+    except ImportError as exc:
+        typer.echo("the API needs the `serve` extra: uv sync --extra serve")
+        raise typer.Exit(code=1) from exc
+    uvicorn.run("valchamps.api.app:app", host=host, port=port, reload=reload)
+
+
+@app.command()
+def dashboard(
+    host: str = typer.Option("127.0.0.1", help="Interface to bind (0.0.0.0 in a container)."),
+    port: int = typer.Option(8501, help="Port."),
+    api_url: str = typer.Option("http://localhost:8000", help="Where `valchamps serve` runs."),
+) -> None:
+    """Run the Streamlit dashboard against the API. Needs the `serve` extra."""
+    import os
+    import subprocess
+    import sys
+
+    try:
+        import streamlit  # noqa: F401
+    except ImportError as exc:
+        typer.echo("the dashboard needs the `serve` extra: uv sync --extra serve")
+        raise typer.Exit(code=1) from exc
+    script = Path(__file__).parent / "dashboard" / "app.py"
+    env = {**os.environ, "VALCHAMPS_API_URL": api_url}
+    cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(script),
+        "--server.port",
+        str(port),
+        "--server.address",
+        host,
+        # The charts' accent blue instead of Streamlit's red, per mode (keeps light/dark switching).
+        "--theme.light.primaryColor",
+        "#2a78d6",
+        "--theme.dark.primaryColor",
+        "#3987e5",
+    ]
+    raise typer.Exit(code=subprocess.call(cmd, env=env))
+
+
 def _display_uri(uri: str) -> str:
     """Tracking URI without any credentials that might be embedded in it."""
     from urllib.parse import urlsplit, urlunsplit
