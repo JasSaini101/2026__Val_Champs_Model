@@ -41,3 +41,7 @@ events:
   - {event_id: 2283, name: "VALORANT Champions 2025", tier: champions, region: international, is_lan: true}
   - {event_id: 2760, name: "VALORANT Masters Santiago 2026", tier: international, region: international, is_lan: true}
   - {event_id: 2765, name: "VALORANT Masters London 2026", tier: international, region: international, is_lan: true}
+  # Target event -------------------------------------------------------------------------------
+  # The tournament being simulated. Re-running `valchamps ingest` refreshes its live and
+  # upcoming matches; finished ones feed the ratings like any other match.
+  - {event_id: 2766, name: "VALORANT Champions 2026", tier: champions, region: international, is_lan: true}

@@ -45,10 +45,11 @@ docker run --rm -v "$PWD/data:/app/data" valchamps ingest --event 2274
 
 ## Data scope
 
-Training data covers 2025 and 2026 (`configs/events.yaml`, 29 events):
+Training data covers 2025 and 2026 (`configs/events.yaml`, 30 events):
 
 - **VCT regional leagues:** Kickoff, Stage 1 and Stage 2 in Americas, EMEA, Pacific and China (24 events). They reflect current rosters and the current meta, and hold most of the tier-1 matches.
 - **International events:** Masters Bangkok 2025, Masters Toronto 2025, Champions 2025, Masters Santiago 2026 and Masters London 2026 (5 events). These are the only matches between teams from different regions. Leagues alone show how a team ranks in its own region, not how the regions compare, and Champions is decided by cross-region matches. These results also show how each region's top teams actually do at international events.
+- **Champions 2026 (event 2766):** the tournament being simulated. Its finished matches count as training data as they're played; its upcoming matches make up the bracket.
 
 ## Data layer
 
