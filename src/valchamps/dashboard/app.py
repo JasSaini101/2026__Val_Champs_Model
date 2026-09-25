@@ -11,7 +11,14 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from valchamps.dashboard.charts import PALETTE, history_lines, score_bars, title_bars
+from valchamps.dashboard import about
+from valchamps.dashboard.charts import (
+    PALETTE,
+    daily_history,
+    history_lines,
+    score_bars,
+    title_bars,
+)
 from valchamps.dashboard.client import (
     DEFAULT_API_URL,
     DEFAULT_DATA_URL,
@@ -56,7 +63,7 @@ def _pct(x: float) -> str:
 with st.sidebar:
     if DEFAULT_DATA_URL:
         api_url = DEFAULT_DATA_URL
-        st.caption("Reading the odds published by the hourly update job.")
+        st.caption("Reading the odds published by the daily update (around 12pm ET).")
     else:
         api_url = st.text_input("API URL", DEFAULT_API_URL)
     event = int(st.number_input("Event id", value=CHAMPIONS_2026, step=1))
@@ -68,10 +75,10 @@ st.title("VALORANT Champions 2026")
 st.markdown(
     "Each team's chance of winning Champions, from **100,000 simulated tournaments**. A model "
     "trained on 2025-26 pro matches gives the odds of each map, a simulated map veto turns those "
-    "into Bo3/Bo5 odds, and the bracket is replayed from the results so far. It re-runs "
-    f"whenever a match finishes. [Code and write-up]({REPO_URL})"
+    "into Bo3/Bo5 odds, and the bracket is replayed from the results so far. It updates once "
+    f"a day, around 12pm ET. [Code and write-up]({REPO_URL})"
 )
-odds_tab, match_tab = st.tabs(["Title odds", "Match predictor"])
+odds_tab, match_tab, about_tab = st.tabs(["Title odds", "Match predictor", "How it works"])
 
 with odds_tab:
     try:
@@ -118,13 +125,13 @@ with odds_tab:
                 },
             )
 
-        st.subheader("How the title odds moved")
+        st.subheader("How the title odds moved, day by day")
         try:
             history = pd.DataFrame(_fetch(api_url, "history", event))
         except ApiError:
             history = pd.DataFrame()
-        if history.empty or history["updated_at"].nunique() < 2:
-            st.caption("The chart appears after the next published update (a new result).")
+        if history.empty or daily_history(history)["day"].nunique() < 2:
+            st.caption("The chart appears after the next daily update (around 12pm ET).")
         else:
             names = teams.sort_values("title", ascending=False)["team"].tolist()
             highlight = st.selectbox("Highlight", names, index=0)
@@ -181,30 +188,29 @@ with match_tab:
                             "pick_b": pct(f"{name_b} pick"),
                             "decider": pct("Decider"),
                             "in_series": st.column_config.ProgressColumn(
-                                "In the series", format="percent", min_value=0.0, max_value=1.0
+                                "In the series",
+                                help="Chance the map is played, from the simulated veto",
+                                format="percent",
+                                min_value=0.0,
+                                max_value=1.0,
                             ),
                         },
                     )
-                st.subheader("Likeliest vetoes")
-                who = {"pick_a": name_a, "pick_b": name_b, "decider": "decider"}
-                route = lambda v: " → ".join(  # noqa: E731
-                    f"{m['map']} ({who[m['picked_by']]})" for m in v["maps"]
-                )
-                st.dataframe(
-                    pd.DataFrame(
-                        [{"probability": v["p"], "vetoes": route(v)} for v in pred["vetoes"]]
-                    ),
-                    hide_index=True,
-                    width="stretch",
-                    column_config={
-                        "probability": st.column_config.NumberColumn(
-                            "Probability", format="percent"
-                        ),
-                        "vetoes": "Maps in play order (who picked)",
-                    },
-                )
                 st.caption(
                     f"Map pool {', '.join(pred['map_pool'])} · model {pred['model']['name']} "
                     f"trained through {pred['model']['trained_through']} · data through "
                     f"{pred['data_through'][:16]}"
                 )
+
+with about_tab:
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        st.subheader("What the model looks at")
+        st.markdown(about.FEATURES)
+    with right:
+        st.subheader("The data")
+        st.markdown(about.DATA)
+        st.subheader("From map odds to title odds")
+        st.markdown(about.PIPELINE)
+        st.subheader("How accurate it is")
+        st.markdown(about.ACCURACY)

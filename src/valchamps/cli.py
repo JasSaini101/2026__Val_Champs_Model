@@ -437,7 +437,7 @@ def update(
     model_path: Path = typer.Option(DEFAULT_MODEL, "--model", help="Trained map model."),
     params_file: Path = typer.Option(DEFAULT_PARAMS, help="YAML with features/series."),
     out_dir: Path = typer.Option(None, help="Where to publish (default: odds/<event>/)."),
-    force: bool = typer.Option(False, help="Publish even if no new result has come in."),
+    force: bool = typer.Option(False, help="Publish even if already published today."),
     seed: int = typer.Option(0, help="Random seed."),
 ) -> None:
     """Live update: scrape the event's new results, re-simulate, publish if anything changed.
@@ -472,7 +472,7 @@ def update(
     else:
         if not (out_dir / "matchups.json").exists() and write_matchups(forecast, out_dir):
             typer.echo(f"wrote the missing {out_dir / 'matchups.json'}")
-        typer.echo(f"no new results since the last update; odds in {out_dir} left as is")
+        typer.echo(f"already published today with these results; odds in {out_dir} left as is")
     if failed:
         raise typer.Exit(code=1)
 

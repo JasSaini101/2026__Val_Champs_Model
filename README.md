@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/JasSaini101/2026__Val_Champs_Model/actions/workflows/ci.yml/badge.svg)](https://github.com/JasSaini101/2026__Val_Champs_Model/actions/workflows/ci.yml) [![Live dashboard](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://valorant-champs-2026.streamlit.app)
 
-**Live dashboard: [valorant-champs-2026.streamlit.app](https://valorant-champs-2026.streamlit.app)** (title odds updated after every match, plus a match predictor)
+**Live dashboard: [valorant-champs-2026.streamlit.app](https://valorant-champs-2026.streamlit.app)** (title odds updated daily around 12pm ET, a match predictor, and how the model works)
 
 An end-to-end ML system that estimates **P(Team A beats Team B) on each map**, rolls those odds up to Bo3/Bo5 series, and runs a **Monte Carlo simulation of the full Champions 2026 bracket** to give each team's chance of lifting the trophy. It updates while the event runs: finished matches are pulled in, ratings refresh, and the bracket is re-simulated from where it stands.
 
@@ -18,7 +18,7 @@ flowchart LR
     F --> G[odds/ JSON + CSV]
     G --> H[FastAPI]
     G --> I[Streamlit dashboard]
-    J([GitHub Actions, hourly]) -.->|scrape → re-simulate → commit| G
+    J([GitHub Actions, daily]) -.->|scrape → re-simulate → commit| G
 ```
 
 **Stack:** Python 3.11, httpx, BeautifulSoup, SQLAlchemy, pandas, LightGBM, PyTorch, scikit-learn, numpy, DVC + DagsHub, MLflow, FastAPI, Streamlit + Altair, GitHub Actions, Docker, pytest.
@@ -218,17 +218,17 @@ It also reports how much probability the simulated veto gave to the real map seq
 `valchamps update` refreshes the forecast while the event runs. It scrapes the event (new results, and bracket slots as they fill in), re-runs the 100,000-tournament simulation from everything now known, and publishes to `odds/2766/`:
 
 - `latest.json`: the current per-team odds, the time of the update, and the finished results behind them.
-- `history.csv`: every published forecast, one row per team, so the odds can be followed through the event.
+- `history.csv`: every published forecast, one row per team, so the odds can be followed day by day through the event.
 - `matchups.json`: the series prediction for every pairing of the event's teams at Bo3 and Bo5 (the same numbers as `predict-match`), so the hosted dashboard needs no API.
 
-It publishes only when the set of finished results has changed, so running it every hour doesn't produce a commit every hour. The map model stays frozen for the event. Elo, form and the other features still update from every new result, because the whole history is replayed before each simulation.
+It publishes when the set of finished results has changed, or when nothing has been published yet that day (US Eastern time), so there is one snapshot per day of the event and a second run on the same day with no new result commits nothing. The map model stays frozen for the event. Elo, form and the other features still update from every new result, because the whole history is replayed before each simulation.
 
-**Schedule** (`.github/workflows/update-odds.yml`): the workflow runs hourly through September and October, and on demand from the Actions tab. Each run:
+**Schedule** (`.github/workflows/update-odds.yml`): the workflow runs once a day at 16:00 UTC (12pm ET) through September and October, and on demand from the Actions tab. GitHub can start scheduled runs late, so updates land around noon. Each run:
 
 1. pulls only the database and the map model from DagsHub, not the page cache
 2. restores the pages scraped by earlier runs from the Actions cache
 3. runs `valchamps update`
-4. commits `odds/` to `main` with `[skip ci]` when the odds changed
+4. commits `odds/` to `main` with `[skip ci]` when it published
 
 It needs the repository secrets `DAGSHUB_USERNAME` and `DAGSHUB_TOKEN`. It only reads from DagsHub and never pushes data back.
 
@@ -251,12 +251,15 @@ uv run valchamps dashboard    # Streamlit on http://127.0.0.1:8501, reading from
 
 **Data sources**: published odds come from `odds/` (`VALCHAMPS_ODDS_DIR`). Predictions replay the database and use `models/map_model.pkl` (`VALCHAMPS_MODEL_PATH`). That state loads on the first request, which takes a few seconds; after that a prediction takes well under a second. The API reloads it when the database or model file changes, so a scheduled update is picked up without a restart.
 
-**Dashboard**: two tabs.
+**Dashboard**: three tabs.
 
-- **Title odds** shows the favourite, a bar chart of every team's title chance, a table of every stage, and the title odds over time with one team highlighted.
-- **Match predictor** shows the series odds for any two teams, the final-score distribution, each team's chance on every map and the likeliest vetoes.
+- **Title odds** shows the favourite, a bar chart of every team's title chance, a table of every stage, and the title odds day by day (from a pre-event baseline) with one team highlighted.
+- **Match predictor** shows the series odds for any two teams, the final-score distribution, and each team's chance on every map with how likely each map is to be played.
+- **How it works** lists the data and every input the map model uses, and how map odds become title odds.
 
 ![Match predictor in the dashboard](docs/images/dashboard_match_predictor.png)
+
+![How it works tab: the data and every model input](docs/images/dashboard_how_it_works.png)
 
 The chart colours come from a palette checked for colour blindness, in both light and dark mode. Both servers bind to localhost by default; pass `--host 0.0.0.0` to expose them.
 
@@ -265,7 +268,7 @@ The chart colours come from a palette checked for colour blindness, in both ligh
 With `VALCHAMPS_DATA_URL` set to a published `odds/` folder (a path or URL), the dashboard reads `latest.json`, `history.csv` and `matchups.json` from it instead of calling the API. The [hosted version](https://valorant-champs-2026.streamlit.app) runs this way against the files the update job commits, so it needs no database, model or server of its own:
 
 1. On [share.streamlit.io](https://share.streamlit.io), create an app from this repository, branch `main`, entrypoint `deploy/streamlit/streamlit_app.py`.
-2. That's all: `deploy/streamlit/requirements.txt` installs only Streamlit, pandas, Altair and httpx, and the app reads `https://raw.githubusercontent.com/JasSaini101/2026__Val_Champs_Model/main/odds`. Each hourly commit shows up within a few minutes.
+2. That's all: `deploy/streamlit/requirements.txt` installs only Streamlit, pandas, Altair and httpx, and the app reads `https://raw.githubusercontent.com/JasSaini101/2026__Val_Champs_Model/main/odds`. Each daily commit shows up within a few minutes.
 
 To try the same mode locally: `VALCHAMPS_DATA_URL=odds uv run streamlit run deploy/streamlit/streamlit_app.py`.
 
@@ -292,7 +295,7 @@ deploy/streamlit/   hosted dashboard entrypoint (reads the published odds from G
 configs/events.yaml events to scrape
 configs/bracket.yaml Champions format and playoff seeding
 odds/<event>/       published live odds (latest.json, history.csv, matchups.json), committed by the update job
-.github/workflows/  CI; update-odds.yml is the hourly live-update job
+.github/workflows/  CI; update-odds.yml is the daily live-update job
 tests/              pytest suite + HTML fixtures
 dvc.yaml            pipeline (ingest -> features -> train)
 params.yaml         feature, model and series hyper-parameters
