@@ -64,6 +64,7 @@ def ingest(
             typer.echo(
                 f"{spec.name}: {report.fetched} fetched, {report.skipped} skipped, "
                 f"{report.pending} pending (teams TBD), {len(report.failed)} failed"
+                + _not_final_note(report)
             )
     if failed:
         raise typer.Exit(code=1)
@@ -458,7 +459,7 @@ def update(
         failed = len(report.failed)
         typer.echo(
             f"{spec.name}: {report.fetched} fetched, {report.skipped} already stored, "
-            f"{report.pending} pending (teams TBD), {failed} failed"
+            f"{report.pending} pending (teams TBD), {failed} failed" + _not_final_note(report)
         )
 
     forecast = _forecast(event, runs, odds, bracket_file, model_path, params_file, None, seed,
@@ -474,6 +475,24 @@ def update(
         typer.echo(f"no new results since the last update; odds in {out_dir} left as is")
     if failed:
         raise typer.Exit(code=1)
+
+
+def _not_final_note(report) -> str:
+    """Summary suffix for matches listed as finished whose page isn't final yet.
+
+    In GitHub Actions it also prints a warning annotation, so the run page shows it.
+    """
+    import os
+
+    if not report.not_final:
+        return ""
+    ids = ", ".join(map(str, report.not_final))
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        typer.echo(
+            f"::warning::{len(report.not_final)} match(es) listed as completed on vlr.gg are "
+            f"not final on their match page yet ({ids}); they will be retried next run"
+        )
+    return f", {len(report.not_final)} listed as completed but not final yet ({ids})"
 
 
 def _forecast(event, runs, odds, bracket_file, model_path, params_file, maps, seed,
