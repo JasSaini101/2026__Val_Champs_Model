@@ -71,6 +71,61 @@ def test_refresh_refetches_everything(settings, engine, vlr):
     assert report.skipped == 0 and report.fetched == 2
 
 
+def _listing_with_378830(status: str) -> str:
+    """The fixture's match list, with the upcoming grand final (378830) given ``status``."""
+    html = load_fixture("event_matches_2097.html")
+    upcoming = '<div class="ml-status">Upcoming</div>'
+    assert html.count(upcoming) == 1
+    return html.replace(upcoming, f'<div class="ml-status">{status}</div>')
+
+
+def _calls(vlr, match_id: int) -> int:
+    return sum(f"/{match_id}/" in str(call.request.url) for call in vlr.calls)
+
+
+def _statuses(engine) -> dict[int, str]:
+    with engine.connect() as conn:
+        return dict(conn.execute(select(db.matches.c.match_id, db.matches.c.status)).all())
+
+
+def test_finished_match_with_a_stale_cached_page_is_refetched(settings, engine, vlr):
+    """A page cached while the match was upcoming must not hide its result once it finishes."""
+    with client(settings) as c:
+        ingest_event(c, engine, SPEC)  # 378830 is upcoming: its page is cached as upcoming
+        c.cache_path("/event/matches/2097/?series_id=all").unlink()  # as if 15 minutes passed
+    assert _statuses(engine)[378830] == "upcoming"
+
+    vlr.get(url__regex=r"/event/matches/2097/").respond(200, text=_listing_with_378830("Completed"))
+    vlr.get(url__regex=r"^https://vlr.test/378830/").respond(
+        200, text=load_fixture("match_378829_completed.html")
+    )
+    before = _calls(vlr, 378830)
+    with client(settings) as c:
+        report = ingest_event(c, engine, SPEC)
+    assert _calls(vlr, 378830) == before + 1  # the stale copy was replaced
+    assert report.fetched == 1 and report.not_final == []
+    assert _statuses(engine)[378830] == "completed"
+
+
+def test_finished_match_with_a_final_cached_page_is_not_refetched(settings, engine, vlr):
+    with client(settings) as c:
+        ingest_event(c, engine, SPEC)
+        ingest_event(c, engine, SPEC, refresh=True)  # re-reads 378829, which is final
+    assert _calls(vlr, 378829) == 1
+
+
+def test_listed_as_finished_but_page_not_final(settings, engine, vlr):
+    """vlr.gg can mark a match completed before its page shows the result: retry next run."""
+    vlr.get(url__regex=r"/event/matches/2097/").respond(200, text=_listing_with_378830("Completed"))
+    with client(settings) as c:
+        report = ingest_event(c, engine, SPEC)
+    assert report.not_final == [378830]
+    assert _calls(vlr, 378830) == 2  # no cached copy, then one refetch to make sure
+    assert _statuses(engine)[378830] == "upcoming"
+    with engine.connect() as conn:
+        assert 378830 not in db.completed_match_ids(conn)  # so the next run tries again
+
+
 def test_load_event_specs(tmp_path):
     path = tmp_path / "events.yaml"
     path.write_text("events:\n  - {event_id: 1, name: A, tier: champions, is_lan: true}\n")

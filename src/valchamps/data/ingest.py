@@ -10,6 +10,7 @@ import yaml
 from sqlalchemy import Engine
 
 from valchamps.data import db
+from valchamps.data.models import Match, MatchListing
 from valchamps.data.parser import (
     ParseError,
     TeamsNotDecided,
@@ -43,6 +44,9 @@ class IngestReport:
     skipped: int = 0
     pending: int = 0  # bracket matches whose teams are not decided yet
     failed: list[int] = field(default_factory=list)
+    # Listed as completed, but the match page doesn't show a final result yet (vlr.gg lag).
+    # Stored as they are and fetched again on the next run.
+    not_final: list[int] = field(default_factory=list)
 
 
 def load_event_specs(path: Path) -> list[EventSpec]:
@@ -76,10 +80,8 @@ def ingest_event(
         if not listing.teams_decided:
             report.pending += 1  # fetched on a later run, once the bracket fills in
             continue
-        # Finished matches never change, so their cached page is always valid.
-        max_age = None if listing.status == "completed" else 0
         try:
-            match = parse_match(client.get(listing.url_path, max_age=max_age), listing.match_id)
+            match = _fetch_match(client, listing)
         except TeamsNotDecided:
             report.pending += 1
             continue
@@ -89,6 +91,10 @@ def ingest_event(
             with engine.begin() as conn:
                 db.log_scrape(conn, listing.url_path, ok=False, message=str(exc))
             continue
+        if listing.status == "completed" and match.status != "completed":
+            log.warning("match %s is listed as completed but its page is not final yet",
+                        listing.match_id)  # fmt: skip
+            report.not_final.append(listing.match_id)
         with engine.begin() as conn:
             db.save_match(conn, match, event_id=spec.event_id)
             db.log_scrape(conn, listing.url_path, ok=True)
@@ -99,8 +105,25 @@ def ingest_event(
         db.save_standings(conn, spec.event_id, parse_standings(event_html))
 
     log.info(
-        "event %s: %d listed, %d fetched, %d skipped, %d pending, %d failed",
+        "event %s: %d listed, %d fetched, %d skipped, %d pending, %d failed, %d not final",
         spec.event_id, report.listed, report.fetched, report.skipped, report.pending,
-        len(report.failed),
+        len(report.failed), len(report.not_final),
     )  # fmt: skip
     return report
+
+
+def _fetch_match(client: VlrClient, listing: MatchListing) -> Match:
+    """Fetch and parse a match page, from the cache when that copy can be trusted.
+
+    A finished match's page never changes, so a cached copy of it is reused forever. But the
+    copy may have been saved before the match finished (a run while it was upcoming or live);
+    then the listing says completed while the cached page doesn't, and the page is refetched.
+    Matches not yet finished are always refetched.
+    """
+    if listing.status != "completed":
+        return parse_match(client.get(listing.url_path, max_age=0), listing.match_id)
+    match = parse_match(client.get(listing.url_path, max_age=None), listing.match_id)
+    if match.status != "completed":
+        log.info("cached page of match %s predates its result; refetching", listing.match_id)
+        match = parse_match(client.get(listing.url_path, max_age=0), listing.match_id)
+    return match
