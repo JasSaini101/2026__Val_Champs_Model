@@ -1,6 +1,6 @@
 """Hosted dashboard for Streamlit Community Cloud (entrypoint: deploy/streamlit/streamlit_app.py).
 
-Runs the regular dashboard against the odds the hourly update job commits to GitHub, so the
+Runs the regular dashboard against the odds the daily update job commits to GitHub, so the
 hosted app needs no API, database or model: only the light packages in requirements.txt here.
 """
 

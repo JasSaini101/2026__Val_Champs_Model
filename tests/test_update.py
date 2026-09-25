@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -67,6 +68,24 @@ def test_publish_only_when_results_change(champions, tmp_path):
     assert len(pd.read_csv(out / "history.csv")) == 48
 
 
+def test_publish_once_per_eastern_day(champions, tmp_path):
+    """Same results: one snapshot per US Eastern day, whatever the UTC date says."""
+    engine, _ = champions
+    out = tmp_path / "odds"
+    forecast = _forecast(engine)
+    noon_sep24 = datetime(2026, 9, 24, 16, 5, tzinfo=UTC)  # 12:05 EDT
+    late_sep24 = datetime(2026, 9, 25, 3, 0, tzinfo=UTC)  # 23:00 EDT, already Sep 25 in UTC
+    early_sep25 = datetime(2026, 9, 25, 4, 30, tzinfo=UTC)  # 00:30 EDT
+    noon_sep25 = datetime(2026, 9, 25, 16, 0, tzinfo=UTC)
+    assert publish(forecast, out, now=noon_sep24)
+    assert not publish(forecast, out, now=late_sep24)
+    assert publish(forecast, out, now=early_sep25)
+    assert not publish(forecast, out, now=noon_sep25)
+    history = pd.read_csv(out / "history.csv")
+    assert list(history["updated_at"].unique()) == [noon_sep24.isoformat(), early_sep25.isoformat()]
+    assert json.loads((out / "latest.json").read_text())["updated_at"] == early_sep25.isoformat()
+
+
 def test_cli_update_without_scraping(champions, tmp_path, monkeypatch):
     engine, _ = champions
     monkeypatch.setenv("VALCHAMPS_DB_URL", str(engine.url))
@@ -78,7 +97,7 @@ def test_cli_update_without_scraping(champions, tmp_path, monkeypatch):
     assert "published to" in first.output
     again = CliRunner().invoke(app, args)
     assert again.exit_code == 0, again.output
-    assert "no new results since the last update" in again.output
+    assert "already published today with these results" in again.output
     assert len(pd.read_csv(out / "history.csv")) == 16
 
 
@@ -126,4 +145,6 @@ def test_workflow_runs_update_and_commits_odds():
     assert "[skip ci]" in commands and "git push origin HEAD:main" in commands
     assert wf["permissions"] == {"contents": "write"}
     triggers = wf[True]  # YAML 1.1 reads the bare key `on` as True
-    assert "workflow_dispatch" in triggers and triggers["schedule"]
+    assert "workflow_dispatch" in triggers
+    # Once a day at 12pm US Eastern (EDT = UTC-4 for the whole event).
+    assert triggers["schedule"] == [{"cron": "0 16 * 9,10 *"}]

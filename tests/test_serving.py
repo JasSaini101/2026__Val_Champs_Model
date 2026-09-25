@@ -210,6 +210,31 @@ def test_charts_build(api, world):
         assert colors["team_b"] in str(specs[2]), mode
 
 
+def test_daily_history_keeps_the_last_snapshot_of_each_eastern_day():
+    import pandas as pd
+
+    snapshots = [  # (updated_at UTC, finished series, title odds of team X)
+        ("2026-09-24T10:05:00+00:00", 0, 0.10),  # pre-event
+        ("2026-09-24T16:00:00+00:00", 2, 0.11),  # Sep 24, noon ET
+        ("2026-09-25T03:30:00+00:00", 3, 0.12),  # Sep 24, 23:30 ET: last of Sep 24
+        ("2026-09-25T16:00:00+00:00", 5, 0.15),  # Sep 25
+    ]
+    history = pd.DataFrame(
+        [
+            {"updated_at": t, "fixed_results": n, "team": team, "title": p if team == "X" else 0.5}
+            for t, n, p in snapshots
+            for team in ("X", "Y")
+        ]
+    )
+    daily = charts.daily_history(history)
+    x = daily[daily["team"] == "X"]
+    assert list(x["day"]) == ["Pre-event", "Sep 24", "Sep 25"]
+    assert list(x["title"]) == [0.10, 0.12, 0.15]
+    assert len(daily) == 6
+    spec = charts.history_lines(history, "X", charts.PALETTE["light"]).to_dict()
+    assert "Pre-event" in str(spec)
+
+
 @respx.mock
 def test_api_client_reports_errors():
     respx.get("http://api.test/events/1/odds").mock(
@@ -246,6 +271,10 @@ def test_dashboard_renders_against_the_api(api, monkeypatch):
     assert not at.exception, at.exception
     labels = [m.label for m in at.metric]
     assert "Favourite" in labels and "Finished series" in labels
+    assert [t.label for t in at.tabs] == ["Title odds", "Match predictor", "How it works"]
+    assert "Likeliest vetoes" not in [h.value for h in at.subheader]
+    assert "What the model looks at" in [h.value for h in at.subheader]
+    assert any("Elo rating" in m.value for m in at.markdown)
     # Match predictor: two different teams are preselected, so a prediction is shown.
     assert any(m.label.endswith(" wins") for m in at.metric)
     assert not at.error

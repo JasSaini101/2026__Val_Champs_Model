@@ -3,3 +3,4 @@ altair==6.3.0
 httpx==0.28.1
 pandas==3.0.6
 streamlit==1.64.0
+tzdata==2026.4  # US Eastern days for the daily chart

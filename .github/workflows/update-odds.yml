@@ -1,4 +1,5 @@
-# Live odds during Champions 2026: scrape new results, re-simulate, commit the odds if they changed.
+# Live odds during Champions 2026, once a day: scrape new results, re-simulate, commit the day's
+# odds (one snapshot per US Eastern day; a same-day rerun with no new result commits nothing).
 #
 # Needs two repository secrets (Settings -> Secrets and variables -> Actions):
 #   DAGSHUB_USERNAME  your DagsHub user name
@@ -9,11 +10,13 @@ name: Update odds
 
 on:
   schedule:
-    - cron: "17 * * 9,10 *"  # hourly through Sep and Oct (the event runs Sep 24 - Oct 18)
+    # 16:00 UTC = 12:00 EDT (Eastern is on daylight time until Nov 1; the event runs Sep 24 -
+    # Oct 18). GitHub can start scheduled runs late, so this is "around noon ET".
+    - cron: "0 16 * 9,10 *"
   workflow_dispatch:
     inputs:
       force:
-        description: "Publish even if no new result has come in"
+        description: "Publish even if today's odds were already published"
         type: boolean
         default: false
 

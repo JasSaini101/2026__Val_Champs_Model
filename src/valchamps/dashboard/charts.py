@@ -66,16 +66,32 @@ def title_bars(teams: pd.DataFrame, colors: dict[str, str]) -> alt.Chart:
     return _axes((bars + labels).properties(height=28 * len(df)), colors)
 
 
+PRE_EVENT = "Pre-event"
+EASTERN = "America/New_York"  # the update job runs daily around noon US Eastern
+
+
+def daily_history(history: pd.DataFrame) -> pd.DataFrame:
+    """One snapshot per day: the last one before any result ("Pre-event"), then the last one of
+    each US Eastern day ("Sep 24", ...). Oldest first, with the label in ``day``."""
+    df = history.assign(updated_at=pd.to_datetime(history["updated_at"], utc=True))
+    local = df["updated_at"].dt.tz_convert(EASTERN)
+    label = local.dt.strftime("%b ") + local.dt.day.astype(str)
+    df["day"] = label.where(df["fixed_results"] > 0, PRE_EVENT)
+    latest = df.groupby("day")["updated_at"].transform("max")
+    return df[df["updated_at"] == latest].sort_values(["updated_at", "team"], ignore_index=True)
+
+
 def history_lines(history: pd.DataFrame, highlight: str, colors: dict[str, str]) -> alt.Chart:
-    """Title odds over the published updates: every team in gray, one team in the accent."""
-    df = history.assign(updated_at=pd.to_datetime(history["updated_at"]))
+    """Title odds day by day: every team in gray, one team in the accent."""
+    df = daily_history(history)
+    days = list(dict.fromkeys(df["day"]))  # oldest first
     tooltip = [
         alt.Tooltip("team:N", title="Team"),
-        alt.Tooltip("updated_at:T", title="Updated", format="%b %d %H:%M"),
+        alt.Tooltip("day:O", title="Day"),
         alt.Tooltip("title:Q", title="Title", format=PCT),
-        alt.Tooltip("fixed_results:Q", title="Results in"),
+        alt.Tooltip("fixed_results:Q", title="Finished series"),
     ]
-    x = alt.X("updated_at:T", title=None)  # Vega picks the tick format for the time span
+    x = alt.X("day:O", sort=days, title=None, axis=alt.Axis(labelAngle=0))
     y = alt.Y("title:Q", title="P(win the title)", axis=alt.Axis(format="%", tickCount=5))
     others = (
         alt.Chart(df[df["team"] != highlight])
